@@ -1,0 +1,76 @@
+{
+  "entities": {
+    "users": {
+      "title": "User",
+      "description": "User profile and role information.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "name": { "type": "string", "description": "Full name" },
+        "email": { "type": "string", "description": "Email address" },
+        "role": { "type": "string", "enum": ["admin", "user"], "description": "User role" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Account creation timestamp" }
+      },
+      "required": ["uid", "name", "email", "role"]
+    },
+    "transactions": {
+      "title": "Transaction",
+      "description": "Tithes, offerings, or expenses.",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["tithe", "offering", "expense"], "description": "Type of transaction" },
+        "amount": { "type": "number", "description": "Transaction amount" },
+        "date": { "type": "string", "format": "date", "description": "Date of the transaction" },
+        "description": { "type": "string", "description": "Description or member name" },
+        "category": { "type": "string", "description": "Category for expenses" },
+        "notes": { "type": "string", "description": "Additional notes" },
+        "createdBy": { "type": "string", "description": "UID of the user who created it" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" }
+      },
+      "required": ["type", "amount", "date", "description", "createdBy"]
+    },
+    "churchSettings": {
+      "title": "Church Settings",
+      "description": "Church name and logo configuration.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Church name" },
+        "logoUrl": { "type": "string", "description": "URL to the church logo" },
+        "pastorName": { "type": "string", "description": "Responsible pastor name" }
+      },
+      "required": ["name"]
+    },
+    "cells": {
+      "title": "Cell",
+      "description": "Church cell group information.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Cell name" },
+        "leader": { "type": "string", "description": "Responsible person/leader" },
+        "memberCount": { "type": "integer", "description": "Number of members" },
+        "conversions": { "type": "integer", "description": "Number of people who accepted Jesus" },
+        "createdBy": { "type": "string", "description": "UID of the user who created it" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" }
+      },
+      "required": ["name", "leader", "memberCount", "conversions", "createdBy"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "users",
+      "description": "User profile documents."
+    },
+    "/transactions/{transactionId}": {
+      "schema": "transactions",
+      "description": "Tithes, offerings, and expenses."
+    },
+    "/settings/church": {
+      "schema": "churchSettings",
+      "description": "Global church settings."
+    },
+    "/cells/{cellId}": {
+      "schema": "cells",
+      "description": "Church cell groups."
+    }
+  }
+}

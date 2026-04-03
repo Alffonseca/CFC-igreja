@@ -1,0 +1,150 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: uid
+    // Fields:
+    //   - uid: string (required)
+    //   - name: string (required)
+    //   - email: string (required)
+    //   - role: string (required, 'admin' or 'user')
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: transactions
+    // Document ID: transactionId
+    // Fields:
+    //   - type: string (required, 'tithe', 'offering', 'expense')
+    //   - amount: number (required, positive)
+    //   - date: string (required, ISO date)
+    //   - description: string (required)
+    //   - category: string (optional)
+    //   - notes: string (optional)
+    //   - createdBy: string (required)
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: settings
+    // Document ID: church
+    // Fields:
+    //   - name: string (required)
+    //   - logoUrl: string (optional)
+    //
+    // Collection: cells
+    // Document ID: cellId
+    // Fields:
+    //   - name: string (required)
+    //   - leader: string (required)
+    //   - memberCount: number (required, non-negative)
+    //   - conversions: number (required, non-negative)
+    //   - createdBy: string (required)
+    //   - createdAt: timestamp (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.email == "emailparasiteslixo@gmail.com" ||
+        request.auth.token.email == "emailparasiteslixo@gestao.igreja" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin")
+      );
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'name', 'email', 'role', 'createdAt']) &&
+             data.uid is string &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.email is string && data.email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$") &&
+             data.role in ['admin', 'user', 'cell', 'pre-admin'] &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidTransaction(data) {
+      return data.keys().hasAll(['type', 'amount', 'date', 'description', 'createdBy', 'createdAt']) &&
+             data.type in ['tithe', 'offering', 'expense'] &&
+             data.amount is number && data.amount > 0 &&
+             data.date is string &&
+             data.description is string && data.description.size() > 0 && data.description.size() < 500 &&
+             data.createdBy == request.auth.uid &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidSettings(data) {
+      return data.keys().hasAll(['name']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+             (!('pastorName' in data) || (data.pastorName is string && data.pastorName.size() < 200)) &&
+             (!('logoUrl' in data) || (data.logoUrl is string && data.logoUrl.size() < 1000));
+    }
+
+    function isValidCell(data) {
+      return data.keys().hasAll(['name', 'leader', 'memberCount', 'conversions', 'createdBy', 'createdAt']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+             data.leader is string && data.leader.size() > 0 && data.leader.size() < 200 &&
+             data.memberCount is number && data.memberCount >= 0 &&
+             data.conversions is number && data.conversions >= 0 &&
+             data.createdBy == request.auth.uid &&
+             data.createdAt is timestamp;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    function isRegistered() {
+      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    match /users/{userId} {
+      allow read: if (isAuthenticated() && request.auth.uid == userId) || isAdmin();
+      allow create: if isAuthenticated() && isAdmin();
+      allow update: if isAuthenticated() && (isAdmin() || request.auth.uid == userId);
+      allow delete: if isAuthenticated() && isAdmin();
+    }
+
+    match /transactions/{transactionId} {
+      allow read: if isRegistered();
+      allow write: if isAuthenticated() && isAdmin();
+      allow delete: if isAuthenticated() && isAdmin();
+    }
+
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if isAuthenticated() && isAdmin();
+    }
+
+    match /cells/{cellId} {
+      allow read: if isRegistered();
+      allow write: if isRegistered();
+      allow delete: if isAdmin();
+    }
+
+    match /meetings/{meetingId} {
+      allow read: if isRegistered();
+      allow write: if isRegistered();
+      allow delete: if isAuthenticated() && isAdmin();
+    }
+
+    match /test_connection/{userId} {
+      allow write: if isAuthenticated() && (isOwner(userId) || isAdmin() || request.auth.token.email == "emailparasiteslixo@gmail.com");
+    }
+
+    match /logs/{logId} {
+      allow read: if isAdmin();
+      allow write: if isAuthenticated();
+    }
+  }
+}

@@ -464,7 +464,7 @@ export default function Reports({ role }: ReportsProps) {
         </div>
 
         <div className="mt-12 text-center text-[10px] text-zinc-400 uppercase tracking-widest">
-          Relatorio gerado em {format(new Date(), 'dd/MM/yyyy HH:mm')} • Ver. 1.0 Beta
+          Relatorio gerado em {format(new Date(), 'dd/MM/yyyy HH:mm')} • Ver. 1.5 Beta
         </div>
       </div>
 

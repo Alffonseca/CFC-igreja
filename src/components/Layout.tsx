@@ -144,7 +144,7 @@ export default function Layout({ role, userName }: LayoutProps) {
       </nav>
 
       {/* Desktop Sidebar Navigation */}
-      <nav className="hidden lg:fixed lg:bottom-0 lg:left-0 lg:top-16 lg:z-40 lg:w-64 lg:border-r lg:border-zinc-200 lg:bg-white lg:pt-8">
+      <nav className="lg:fixed lg:bottom-0 lg:left-0 lg:top-16 lg:z-40 lg:w-64 lg:border-r lg:border-zinc-200 lg:bg-white lg:pt-8">
         <div className="flex flex-col gap-2 px-4">
           {navItems.map((item) => (
             <NavLink

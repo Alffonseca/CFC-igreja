@@ -22,6 +22,7 @@ interface LayoutProps {
 }
 
 export default function Layout({ role, userName }: LayoutProps) {
+  console.log('Layout: Renderizando com role:', role, 'userName:', userName);
   const navigate = useNavigate();
   const [churchSettings, setChurchSettings] = useState<{ name: string; logoUrl?: string } | null>(null);
 
@@ -59,6 +60,7 @@ export default function Layout({ role, userName }: LayoutProps) {
       { to: '/settings', icon: SettingsIcon, label: 'Ajustes' }
     ] : [])
   ];
+  console.log('Layout: navItems:', navItems);
 
   return (
     <div className="flex min-h-screen flex-col bg-zinc-50">

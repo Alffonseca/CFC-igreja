@@ -25,9 +25,11 @@ export default function App() {
       console.log('App: Auth state changed, user:', currentUser?.email);
       if (currentUser) {
         try {
-          console.log('App: Buscando documento do usuário:', currentUser.uid);
-          const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
-          console.log('App: Documento encontrado?', userDoc.exists());
+          console.log('App: Iniciando busca no Firestore...');
+          const userDocRef = doc(db, 'users', currentUser.uid);
+          console.log('App: Ref criada:', userDocRef.path);
+          const userDoc = await getDoc(userDocRef);
+          console.log('App: getDoc executado. Existe?', userDoc.exists());
           
           if (userDoc.exists()) {
             console.log('App: Dados do usuário:', userDoc.data());
@@ -35,6 +37,7 @@ export default function App() {
             setRole(userDoc.data().role);
             setUserName(userDoc.data().name);
             setLoading(false);
+            console.log('App: Estados atualizados.');
           } else if (currentUser.email === 'emailparasiteslixo@gmail.com') {
             console.log('App: Usuário não encontrado, mas é o admin padrão.');
             setUser(currentUser);
@@ -67,13 +70,10 @@ export default function App() {
   }, []);
 
   if (loading) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-zinc-50">
-        <div className="h-12 w-12 animate-spin rounded-full border-4 border-zinc-900 border-t-transparent"></div>
-      </div>
-    );
+    console.log('App: Ainda carregando...');
   }
 
+  console.log('App: Renderizando rotas. User:', user, 'Role:', role);
   return (
     <HashRouter>
       <Routes>

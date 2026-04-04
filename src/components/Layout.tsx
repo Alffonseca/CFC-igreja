@@ -12,7 +12,9 @@ import {
   LogOut,
   Shield,
   Globe,
-  Clock
+  Clock,
+  MessageSquare,
+  Image as ImageIcon
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -53,6 +55,8 @@ export default function Layout({ role, userName }: LayoutProps) {
     ] : []),
     { to: '/cells', icon: UsersIcon, label: 'Celulas' },
     { to: '/reports', icon: FileText, label: 'Relatorios' },
+    { to: '/mural', icon: ImageIcon, label: 'Mural' },
+    { to: '/chat', icon: MessageSquare, label: 'Chat' },
     ...(role === 'admin' ? [
       { to: '/users', icon: Shield, label: 'Usuarios' },
       { to: '/logs', icon: Clock, label: 'Logs' },

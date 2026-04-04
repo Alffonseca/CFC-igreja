@@ -53,6 +53,33 @@
         "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" }
       },
       "required": ["name", "leader", "memberCount", "conversions", "createdBy"]
+    },
+    "activities": {
+      "title": "Activity",
+      "description": "Mural activity.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "Activity title" },
+        "description": { "type": "string", "description": "Activity description" },
+        "type": { "type": "string", "enum": ["image", "video", "link"], "description": "Content type" },
+        "url": { "type": "string", "description": "URL to media or link" },
+        "createdBy": { "type": "string", "description": "UID of the user who created it" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" }
+      },
+      "required": ["title", "type", "createdBy", "createdAt"]
+    },
+    "messages": {
+      "title": "Message",
+      "description": "Chat message.",
+      "type": "object",
+      "properties": {
+        "text": { "type": "string", "description": "Message text" },
+        "senderName": { "type": "string", "description": "Name of the sender" },
+        "senderUid": { "type": "string", "description": "UID of the sender" },
+        "recipientUid": { "type": "string", "description": "UID of the recipient (optional)" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" }
+      },
+      "required": ["text", "senderName", "senderUid", "createdAt"]
     }
   },
   "firestore": {
@@ -71,6 +98,14 @@
     "/cells/{cellId}": {
       "schema": "cells",
       "description": "Church cell groups."
+    },
+    "/activities/{activityId}": {
+      "schema": "activities",
+      "description": "Mural activities."
+    },
+    "/messages/{messageId}": {
+      "schema": "messages",
+      "description": "Chat messages."
     }
   }
 }

@@ -11,6 +11,8 @@ import Cells from './components/Cells';
 import Users from './components/Users';
 import Settings from './components/Settings';
 import Logs from './components/Logs';
+import Mural from './components/Mural';
+import Chat from './components/Chat';
 import Layout from './components/Layout';
 
 export default function App() {
@@ -89,6 +91,8 @@ export default function App() {
           <Route path="/reports" element={<Reports role={role} />} />
           <Route path="/users" element={role === 'admin' ? <Users /> : <Navigate to="/" />} />
           <Route path="/logs" element={role === 'admin' ? <Logs /> : <Navigate to="/" />} />
+          <Route path="/mural" element={<Mural />} />
+          <Route path="/chat" element={<Chat />} />
           <Route path="/settings" element={role === 'admin' ? <Settings /> : <Navigate to="/" />} />
         </Route>
 

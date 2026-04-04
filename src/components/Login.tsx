@@ -305,7 +305,7 @@ export default function Login() {
             Sistema de Gestao Financeira
           </p>
           <p className="mt-2 text-[10px] text-zinc-400 uppercase tracking-widest font-semibold">
-            Ver. 1.5.1
+            Ver. 1.5.5
           </p>
         </div>
       </motion.div>

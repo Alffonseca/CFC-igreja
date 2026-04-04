@@ -20,7 +20,6 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    console.log("Versão do App: 1.5.5");
     console.log('App: Inicializando onAuthStateChanged');
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       console.log('App: Auth state changed, user:', currentUser?.email);

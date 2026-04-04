@@ -17,6 +17,7 @@ interface LogEntry {
 export default function Logs() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [searchDate, setSearchDate] = useState('');
 
   useEffect(() => {
     const q = query(collection(db, 'logs'), orderBy('timestamp', 'desc'));
@@ -39,24 +40,39 @@ export default function Logs() {
     return () => unsubscribe();
   }, []);
 
-  const filteredLogs = logs.filter(log => 
-    log.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    log.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    log.action?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    log.details?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredLogs = logs.filter(log => {
+    const matchesSearch = 
+      log.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      log.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      log.action?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      log.details?.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    const matchesDate = searchDate 
+      ? log.timestamp?.toDate().toISOString().split('T')[0] === searchDate
+      : true;
+
+    return matchesSearch && matchesDate;
+  });
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold text-zinc-900">Logs do Sistema</h1>
-        <input
-          type="text"
-          placeholder="Pesquisar logs..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="rounded-lg border border-zinc-200 bg-white px-4 py-2 outline-none focus:border-zinc-900"
-        />
+        <div className="flex gap-2">
+          <input
+            type="date"
+            value={searchDate}
+            onChange={(e) => setSearchDate(e.target.value)}
+            className="rounded-lg border border-zinc-200 bg-white px-4 py-2 outline-none focus:border-zinc-900"
+          />
+          <input
+            type="text"
+            placeholder="Pesquisar logs..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="rounded-lg border border-zinc-200 bg-white px-4 py-2 outline-none focus:border-zinc-900"
+          />
+        </div>
       </div>
       <div className="overflow-x-auto rounded-xl bg-white shadow-sm ring-1 ring-zinc-200 scrollbar-hide">
         <table className="w-full min-w-[800px] text-left text-sm">

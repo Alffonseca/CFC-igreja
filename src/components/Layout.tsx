@@ -59,8 +59,6 @@ export default function Layout({ role, userName }: LayoutProps) {
       { to: '/settings', icon: SettingsIcon, label: 'Ajustes' }
     ] : [])
   ];
-  
-  console.log('Layout: Role recebido:', role, 'navItems length:', navItems.length);
 
   return (
     <div className="flex min-h-screen flex-col bg-zinc-50">
@@ -108,7 +106,6 @@ export default function Layout({ role, userName }: LayoutProps) {
       </main>
 
       {/* Bottom Navigation */}
-      {console.log('Layout: Renderizando menu inferior, navItems length:', navItems.length)}
       <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-zinc-200 bg-white pb-safe pt-2 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] lg:hidden">
         <div className="mx-auto flex max-w-lg items-center justify-between overflow-x-auto px-4 scrollbar-hide">
           {navItems.map((item) => (
@@ -144,7 +141,7 @@ export default function Layout({ role, userName }: LayoutProps) {
       </nav>
 
       {/* Desktop Sidebar Navigation */}
-      <nav className="lg:fixed lg:bottom-0 lg:left-0 lg:top-16 lg:z-40 lg:w-64 lg:border-r lg:border-zinc-200 lg:bg-white lg:pt-8">
+      <nav className="hidden lg:block lg:fixed lg:bottom-0 lg:left-0 lg:top-16 lg:z-40 lg:w-64 lg:border-r lg:border-zinc-200 lg:bg-white lg:pt-8">
         <div className="flex flex-col gap-2 px-4">
           {navItems.map((item) => (
             <NavLink

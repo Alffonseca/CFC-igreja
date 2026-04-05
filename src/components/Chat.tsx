@@ -65,6 +65,7 @@ export default function Chat() {
     e.preventDefault();
     if (!newMessage.trim() || !auth.currentUser) return;
     
+    console.log('Chat: Enviando mensagem para:', recipientUid);
     const messageData: any = {
       text: newMessage,
       senderName: auth.currentUser.displayName || auth.currentUser.email?.split('@')[0] || 'Usuário',
@@ -81,9 +82,15 @@ export default function Chat() {
   };
 
   const filteredMessages = messages.filter(msg => {
-    if (recipientUid === 'all') return !msg.recipientUid;
-    return (msg.senderUid === auth.currentUser?.uid && msg.recipientUid === recipientUid) ||
-           (msg.senderUid === recipientUid && msg.recipientUid === auth.currentUser?.uid);
+    const isPublic = !msg.recipientUid;
+    const isPrivateForMe = msg.recipientUid === auth.currentUser?.uid && msg.senderUid === recipientUid;
+    const isPrivateFromMe = msg.senderUid === auth.currentUser?.uid && msg.recipientUid === recipientUid;
+    
+    if (recipientUid === 'all') return isPublic;
+    
+    const isMatch = isPrivateForMe || isPrivateFromMe;
+    if (isMatch) console.log('Chat: Mensagem filtrada (match):', msg);
+    return isMatch;
   });
 
   return (

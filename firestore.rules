@@ -178,7 +178,8 @@ service cloud.firestore {
         isAdmin() ||
         resource.data.recipientUid == request.auth.uid || 
         resource.data.senderUid == request.auth.uid ||
-        resource.data.recipientUid == null
+        resource.data.recipientUid == null ||
+        resource.data.recipientUid == 'public'
       );
       allow create: if isRegistered() && isValidMessage(request.resource.data);
     }

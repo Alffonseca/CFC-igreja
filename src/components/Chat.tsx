@@ -31,6 +31,7 @@ export default function Chat() {
     const q = query(
       collection(db, 'messages'),
       or(
+        where('recipientUid', '==', 'public'),
         where('recipientUid', '==', null),
         where('recipientUid', '==', auth.currentUser.uid),
         where('senderUid', '==', auth.currentUser.uid)
@@ -78,12 +79,9 @@ export default function Chat() {
       text: newMessage,
       senderName: auth.currentUser.displayName || auth.currentUser.email?.split('@')[0] || 'Usuário',
       senderUid: auth.currentUser.uid,
-      createdAt: serverTimestamp()
+      createdAt: serverTimestamp(),
+      recipientUid: recipientUid === 'all' ? 'public' : recipientUid
     };
-    
-    if (recipientUid !== 'all') {
-      messageData.recipientUid = recipientUid;
-    }
     
     await addDoc(collection(db, 'messages'), messageData);
     setNewMessage('');

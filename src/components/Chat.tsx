@@ -30,8 +30,9 @@ export default function Chat() {
 
     const q = query(collection(db, 'messages'), orderBy('createdAt', 'asc'));
     const unsubscribeMessages = onSnapshot(q, (snapshot) => {
-      console.log('Chat: Mensagens recebidas:', snapshot.docs.length);
-      setMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Message)));
+      const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Message));
+      console.log('Chat: Mensagens recebidas:', msgs);
+      setMessages(msgs);
     }, (error) => {
       console.error('Chat: Erro ao ler mensagens:', error);
     });

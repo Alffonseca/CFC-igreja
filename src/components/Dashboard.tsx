@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { collection, query, onSnapshot, where, Timestamp } from 'firebase/firestore';
+import { collection, query, onSnapshot, where, Timestamp, doc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { TrendingUp, TrendingDown, Wallet, DollarSign } from 'lucide-react';
 import { motion } from 'motion/react';
@@ -19,6 +19,7 @@ export default function Dashboard() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [chartType, setChartType] = useState<'pie' | 'bar'>('pie');
+  const [churchSettings, setChurchSettings] = useState<{ qrCodeUrl?: string; titheMessage?: string } | null>(null);
 
   useEffect(() => {
     const q = query(collection(db, 'transactions'));
@@ -28,7 +29,16 @@ export default function Dashboard() {
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    const unsubscribeSettings = onSnapshot(doc(db, 'settings', 'church'), (sDoc) => {
+      if (sDoc.exists()) {
+        setChurchSettings(sDoc.data() as any);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+      unsubscribeSettings();
+    };
   }, []);
 
   const currentMonth = startOfMonth(new Date());
@@ -63,9 +73,17 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8">
-      <header>
-        <h1 className="text-3xl font-bold text-zinc-900">Dashboard</h1>
-        <p className="text-zinc-500">Resumo financeiro de {format(new Date(), 'MMMM yyyy', { locale: ptBR })}</p>
+      <header className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-zinc-900">Dashboard</h1>
+          <p className="text-zinc-500">Resumo financeiro de {format(new Date(), 'MMMM yyyy', { locale: ptBR })}</p>
+        </div>
+        {churchSettings?.qrCodeUrl && (
+          <div className="flex items-center gap-4 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-zinc-200">
+            <img src={churchSettings.qrCodeUrl} alt="QR Code" className="h-16 w-16 object-contain" referrerPolicy="no-referrer" />
+            {churchSettings.titheMessage && <p className="text-sm font-medium text-zinc-700 max-w-[200px]">{churchSettings.titheMessage}</p>}
+          </div>
+        )}
       </header>
 
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">

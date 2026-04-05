@@ -25,6 +25,14 @@ export default function App() {
     console.log('App: Inicializando onAuthStateChanged');
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       console.log('App: Auth state changed, user:', currentUser?.email);
+      
+      // Se já estiver carregando, não reseta tudo
+      if (currentUser) {
+        console.log('App: Usuário logado, buscando dados...');
+      } else {
+        console.log('App: Usuário não logado, resetando estado.');
+      }
+      
       setUserName(null);
       setRole(null);
       setUser(null);
@@ -32,7 +40,7 @@ export default function App() {
 
       if (currentUser) {
         try {
-          console.log('App: Iniciando busca no Firestore...');
+          console.log('App: Iniciando busca no Firestore para:', currentUser.uid);
           const userDocRef = doc(db, 'users', currentUser.uid);
           console.log('App: Ref criada:', userDocRef.path);
           const userDoc = await getDoc(userDocRef);
@@ -40,6 +48,7 @@ export default function App() {
           
           if (userDoc.exists()) {
             const data = userDoc.data();
+            console.log('App: Dados do usuário encontrados:', data);
             await setDoc(userDocRef, { status: 'online', lastSeen: serverTimestamp() }, { merge: true });
             setUser(currentUser);
             setRole(data.role);

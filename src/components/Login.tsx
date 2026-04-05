@@ -87,26 +87,10 @@ export default function Login() {
     e.preventDefault();
     setError('');
     setLoading(true);
+    console.log('Login: Iniciando login');
 
     const email = username.trim().includes('@') ? username.trim() : `${username.trim()}@gestao.igreja`;
-
-    // Verifica se já está logado
-    const usersRef = collection(db, 'users');
-    const q = query(usersRef, where('email', '==', email));
-    const querySnapshot = await getDocs(q);
-    if (!querySnapshot.empty) {
-        const userDoc = querySnapshot.docs[0];
-        const userData = userDoc.data();
-        const now = new Date().getTime();
-        const lastSeen = userData.lastSeen?.toDate().getTime() || 0;
-        const isOnline = (now - lastSeen) < 5 * 60 * 1000; // 5 minutos
-        
-        if (isOnline) {
-            setError('Usuário já logado.');
-            setLoading(false);
-            return;
-        }
-    }
+    console.log('Login: Email formatado:', email);
 
     const timeoutPromise = new Promise((_, reject) => 
       setTimeout(() => reject(new Error('Tempo de login esgotado (15s)')), 15000)
@@ -114,8 +98,30 @@ export default function Login() {
 
     try {
       try {
+        console.log('Login: Chamando signInWithEmailAndPassword...');
         const loginPromise = signInWithEmailAndPassword(auth, email, password);
-        await Promise.race([loginPromise, timeoutPromise]);
+        const userCredential = await Promise.race([loginPromise, timeoutPromise]) as any;
+        console.log('Login: signInWithEmailAndPassword concluído.');
+        
+        // Verifica se já está logado após autenticação
+        console.log('Login: Verificando se usuário já está online...');
+        const userDoc = await getDoc(doc(db, 'users', userCredential.user.uid));
+        if (userDoc.exists()) {
+            const userData = userDoc.data();
+            const now = new Date().getTime();
+            const lastSeen = userData.lastSeen?.toDate().getTime() || 0;
+            const isOnline = (now - lastSeen) < 5 * 60 * 1000; // 5 minutos
+            
+            if (isOnline) {
+                console.log('Login: Usuário já online.');
+                await signOut(auth);
+                setError('Usuário já logado.');
+                setLoading(false);
+                return;
+            }
+        }
+        console.log('Login: Usuário não está online, prosseguindo...');
+
         await addDoc(collection(db, 'logs'), { 
           email, 
           action: 'Login', 
@@ -123,9 +129,11 @@ export default function Login() {
           timestamp: serverTimestamp() 
         });
       } catch (err: any) {
+        console.log('Login: Erro no login inicial:', err.message);
         // Se for o admin padrao e nao conseguir logar, tenta criar a conta
         if (username === 'admin' && password === 'Jesus2512') {
           try {
+            console.log('Login: Tentando criar conta admin...');
             const createPromise = createUserWithEmailAndPassword(auth, email, password);
             const userCredential = await Promise.race([createPromise, timeoutPromise]) as any;
             
@@ -137,8 +145,10 @@ export default function Login() {
               createdAt: serverTimestamp()
             });
           } catch (createErr: any) {
+            console.log('Login: Erro ao criar conta admin:', createErr.message);
             if (createErr.code === 'auth/email-already-in-use') {
               // Se ja existe, tenta logar de novo (pode ser erro de rede anterior)
+              console.log('Login: Conta já existe, tentando logar novamente...');
               const retryLoginPromise = signInWithEmailAndPassword(auth, email, password);
               await Promise.race([retryLoginPromise, timeoutPromise]);
             } else {
@@ -153,6 +163,7 @@ export default function Login() {
       console.error('Login Error:', err.code, err.message);
       setError(err.message === 'Tempo de login esgotado (15s)' ? err.message : 'Usuario ou senha invalidos. Tente novamente.');
     } finally {
+      console.log('Login: Finalizando loading.');
       setLoading(false);
     }
   };

@@ -12,10 +12,12 @@ interface ChurchSettings {
   name: string;
   logoUrl?: string;
   pastorName?: string;
+  qrCodeUrl?: string;
+  titheMessage?: string;
 }
 
 export default function Settings() {
-  const [settings, setSettings] = useState<ChurchSettings>({ name: '', logoUrl: '', pastorName: '' });
+  const [settings, setSettings] = useState<ChurchSettings>({ name: '', logoUrl: '', pastorName: '', qrCodeUrl: '', titheMessage: '' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -143,14 +145,29 @@ export default function Settings() {
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-bold uppercase tracking-wider text-zinc-500">Logo da Igreja</label>
+              <label className="text-sm font-bold uppercase tracking-wider text-zinc-500">QR Code para Dizimos/Ofertas</label>
               <div className="space-y-4">
                 <div className="flex items-center gap-4">
                   <label className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg border-2 border-dashed border-zinc-200 bg-zinc-50 p-6 transition-all hover:border-zinc-900 hover:bg-zinc-100">
                     <input
                       type="file"
                       accept="image/*"
-                      onChange={handleFileUpload}
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        setUploading(true);
+                        try {
+                          const storageRef = ref(storage, `church/qr_${Date.now()}`);
+                          await uploadBytes(storageRef, file);
+                          const url = await getDownloadURL(storageRef);
+                          setSettings(prev => ({ ...prev, qrCodeUrl: url }));
+                          alert('QR Code carregado com sucesso!');
+                        } catch (err: any) {
+                          alert('Erro ao fazer upload do QR Code: ' + err.message);
+                        } finally {
+                          setUploading(false);
+                        }
+                      }}
                       className="hidden"
                     />
                     {uploading ? (
@@ -161,7 +178,7 @@ export default function Settings() {
                     ) : (
                       <div className="flex flex-col items-center gap-1 text-zinc-500">
                         <Upload size={24} />
-                        <span className="text-sm font-medium">Clique para selecionar imagem</span>
+                        <span className="text-sm font-medium">Clique para selecionar QR Code</span>
                       </div>
                     )}
                   </label>
@@ -171,38 +188,34 @@ export default function Settings() {
                   <ImageIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
                   <input
                     type="url"
-                    value={settings.logoUrl || ''}
-                    onChange={(e) => setSettings({ ...settings, logoUrl: e.target.value })}
+                    value={settings.qrCodeUrl || ''}
+                    onChange={(e) => setSettings({ ...settings, qrCodeUrl: e.target.value })}
                     className="w-full rounded-lg border border-zinc-200 bg-zinc-50 py-2.5 pl-10 pr-4 outline-none transition-all focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10"
-                    placeholder="Ou cole o link da imagem aqui (URL)"
+                    placeholder="Ou cole o link do QR Code aqui (URL)"
                   />
                 </div>
-                <p className="text-[10px] text-zinc-400 italic">
-                  Dica: Se o upload falhar, você pode hospedar a imagem em um site externo e colar o link acima.
-                </p>
               </div>
             </div>
 
-            {settings.logoUrl && (
-              <div className="rounded-xl bg-zinc-50 p-4 text-center relative min-h-[160px] flex flex-col items-center justify-center">
-                <p className="mb-2 text-xs font-bold uppercase tracking-widest text-zinc-400">Previa da Logo</p>
-                {imageLoading && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-zinc-50/50">
-                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-200 border-t-zinc-900" />
-                  </div>
-                )}
+            <div className="space-y-2">
+              <label className="text-sm font-bold uppercase tracking-wider text-zinc-500">Mensagem para Dizimos/Ofertas</label>
+              <textarea
+                value={settings.titheMessage || ''}
+                onChange={(e) => setSettings({ ...settings, titheMessage: e.target.value })}
+                className="w-full rounded-lg border border-zinc-200 bg-zinc-50 py-2.5 px-4 outline-none transition-all focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10"
+                placeholder="Ex: Contribua com a obra de Deus..."
+                rows={3}
+              />
+            </div>
+
+            {settings.qrCodeUrl && (
+              <div className="rounded-xl bg-zinc-50 p-4 text-center">
+                <p className="mb-2 text-xs font-bold uppercase tracking-widest text-zinc-400">Previa do QR Code</p>
                 <img 
-                  key={settings.logoUrl}
-                  src={settings.logoUrl} 
-                  alt="Logo Preview" 
-                  className={`mx-auto h-32 w-32 object-contain transition-opacity duration-300 ${imageLoading ? 'opacity-0' : 'opacity-100'}`}
+                  src={settings.qrCodeUrl} 
+                  alt="QR Code Preview" 
+                  className="mx-auto h-32 w-32 object-contain"
                   referrerPolicy="no-referrer"
-                  onLoad={() => setImageLoading(false)}
-                  onError={(e) => {
-                    console.error('Erro ao carregar imagem da logo:', settings.logoUrl);
-                    (e.target as HTMLImageElement).src = 'https://placehold.co/200x200?text=Erro+ao+carregar';
-                    setImageLoading(false);
-                  }}
                 />
               </div>
             )}

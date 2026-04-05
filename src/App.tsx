@@ -25,6 +25,11 @@ export default function App() {
     console.log('App: Inicializando onAuthStateChanged');
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       console.log('App: Auth state changed, user:', currentUser?.email);
+      setUserName(null);
+      setRole(null);
+      setUser(null);
+      setLoading(true);
+
       if (currentUser) {
         try {
           console.log('App: Iniciando busca no Firestore...');

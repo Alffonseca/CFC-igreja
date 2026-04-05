@@ -174,7 +174,11 @@ service cloud.firestore {
     }
 
     match /messages/{messageId} {
-      allow read: if isRegistered() && (resource.data.recipientUid == null || resource.data.recipientUid == request.auth.uid || resource.data.senderUid == request.auth.uid);
+      allow read: if isRegistered() && (
+        resource.data.recipientUid == request.auth.uid || 
+        resource.data.senderUid == request.auth.uid ||
+        resource.data.recipientUid == null
+      );
       allow create: if isRegistered() && isValidMessage(request.resource.data);
     }
   }

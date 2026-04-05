@@ -26,23 +26,29 @@ export default function Chat() {
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (!auth.currentUser) return;
+
     const q = query(collection(db, 'messages'), orderBy('createdAt', 'asc'));
     const unsubscribeMessages = onSnapshot(q, (snapshot) => {
       console.log('Chat: Mensagens recebidas:', snapshot.docs.length);
       setMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Message)));
+    }, (error) => {
+      console.error('Chat: Erro ao ler mensagens:', error);
     });
 
     const usersQuery = query(collection(db, 'users'));
     const unsubscribeUsers = onSnapshot(usersQuery, (snapshot) => {
       console.log('Chat: Usuários recebidos:', snapshot.docs.length);
       setUsers(snapshot.docs.map(doc => ({ uid: doc.id, name: doc.data().name, status: doc.data().status || 'offline' } as User)));
+    }, (error) => {
+      console.error('Chat: Erro ao ler usuários:', error);
     });
 
     return () => {
       unsubscribeMessages();
       unsubscribeUsers();
     };
-  }, []);
+  }, [auth.currentUser]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { 
   LayoutDashboard, 
@@ -45,6 +45,13 @@ export default function Layout({ role, userName }: LayoutProps) {
   }, []);
 
   const handleLogout = async () => {
+    if (auth.currentUser) {
+      try {
+        await updateDoc(doc(db, 'users', auth.currentUser.uid), { status: 'offline' });
+      } catch (err) {
+        console.error('Error updating status to offline:', err);
+      }
+    }
     await signOut(auth);
     navigate('/login');
   };

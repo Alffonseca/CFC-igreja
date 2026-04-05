@@ -26,6 +26,12 @@ export default function Chat() {
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if ('Notification' in window && Notification.permission !== 'granted') {
+      Notification.requestPermission();
+    }
+  }, []);
+
+  useEffect(() => {
     if (!auth.currentUser) return;
 
     const q = query(
@@ -41,6 +47,15 @@ export default function Chat() {
     const unsubscribeMessages = onSnapshot(q, (snapshot) => {
       const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Message));
       console.log('Chat: Mensagens recebidas:', msgs);
+      
+      // Notificação para novas mensagens privadas
+      if (snapshot.docChanges().some(change => change.type === 'added')) {
+        const lastMsg = msgs[msgs.length - 1];
+        if (lastMsg.senderUid !== auth.currentUser?.uid && lastMsg.recipientUid === auth.currentUser?.uid && document.hidden) {
+          new Notification('Nova mensagem privada', { body: `${lastMsg.senderName}: ${lastMsg.text}` });
+        }
+      }
+      
       setMessages(msgs);
     }, (error) => {
       console.error('Chat: Erro ao ler mensagens:', error);

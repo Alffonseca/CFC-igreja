@@ -34,12 +34,15 @@ export default function App() {
           console.log('App: getDoc executado. Existe?', userDoc.exists());
           
           if (userDoc.exists()) {
-            console.log('App: Dados do usuário:', userDoc.data());
+            const data = userDoc.data();
+            console.log('App: Dados do usuário:', data);
+            console.log('App: UID do usuário logado:', currentUser.uid);
+            console.log('App: Nome buscado:', data.name);
             await setDoc(userDocRef, { status: 'online', lastSeen: serverTimestamp() }, { merge: true });
             setUser(currentUser);
-            setRole(userDoc.data().role);
-            setUserName(userDoc.data().name);
-            console.log('App: userName definido como:', userDoc.data().name);
+            setRole(data.role);
+            setUserName(data.name);
+            console.log('App: userName definido como:', data.name);
             setLoading(false);
             console.log('App: Estados atualizados.');
           } else if (currentUser.email === 'emailparasiteslixo@gmail.com') {
@@ -72,6 +75,23 @@ export default function App() {
 
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const updateLastSeen = async () => {
+      try {
+        await setDoc(doc(db, 'users', user.uid), { lastSeen: serverTimestamp() }, { merge: true });
+      } catch (error) {
+        console.error('App: Erro ao atualizar lastSeen:', error);
+      }
+    };
+
+    updateLastSeen();
+    const interval = setInterval(updateLastSeen, 60000); // Atualiza a cada 1 minuto
+
+    return () => clearInterval(interval);
+  }, [user]);
 
   if (loading) {
     return (

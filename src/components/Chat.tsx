@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, getDocs } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, or, where } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Send } from 'lucide-react';
 
@@ -28,7 +28,15 @@ export default function Chat() {
   useEffect(() => {
     if (!auth.currentUser) return;
 
-    const q = query(collection(db, 'messages'), orderBy('createdAt', 'asc'));
+    const q = query(
+      collection(db, 'messages'),
+      or(
+        where('recipientUid', '==', null),
+        where('recipientUid', '==', auth.currentUser.uid),
+        where('senderUid', '==', auth.currentUser.uid)
+      ),
+      orderBy('createdAt', 'asc')
+    );
     const unsubscribeMessages = onSnapshot(q, (snapshot) => {
       const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Message));
       console.log('Chat: Mensagens recebidas:', msgs);

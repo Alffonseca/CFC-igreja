@@ -29,6 +29,7 @@ export default function Users() {
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [currentUserProfile, setCurrentUserProfile] = useState<UserProfile | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
   const [formData, setFormData] = useState({
     name: '',
@@ -221,30 +222,54 @@ export default function Users() {
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-zinc-900">Usuarios</h1>
-          <p className="text-zinc-500">Gerencie quem tem acesso ao sistema</p>
+      <header className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-zinc-900">Usuarios</h1>
+            <p className="text-zinc-500">Gerencie quem tem acesso ao sistema</p>
+          </div>
+          <button
+            onClick={() => {
+              setEditingUser(null);
+              setFormData({ name: '', email: '', password: '', role: 'user' });
+              setIsModalOpen(true);
+            }}
+            className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2.5 font-semibold text-white transition-all hover:bg-zinc-800 active:scale-95"
+          >
+            <UserPlus size={20} />
+            Adicionar Usuario
+          </button>
         </div>
-        <button
-          onClick={() => {
-            setEditingUser(null);
-            setFormData({ name: '', email: '', password: '', role: 'user' });
-            setIsModalOpen(true);
-          }}
-          className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2.5 font-semibold text-white transition-all hover:bg-zinc-800 active:scale-95"
-        >
-          <UserPlus size={20} />
-          Adicionar Usuario
-        </button>
+        <input
+          type="text"
+          placeholder="Pesquisar por nome ou nivel..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="w-full rounded-lg border border-zinc-200 bg-white px-4 py-2.5 outline-none focus:ring-2 focus:ring-zinc-900/10"
+        />
       </header>
 
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
         {users.filter(user => {
-          if (currentUserProfile?.role === 'admin') return true;
-          if (currentUserProfile?.role === 'pastor') return user.role !== 'admin';
-          if (currentUserProfile?.role === 'secretaria') return user.role !== 'admin' && user.role !== 'pastor';
-          return false;
+          // Existing role-based filter
+          let matchesRole = false;
+          if (currentUserProfile?.role === 'admin') matchesRole = true;
+          else if (currentUserProfile?.role === 'pastor') matchesRole = user.role !== 'admin';
+          else if (currentUserProfile?.role === 'secretaria') matchesRole = user.role !== 'admin' && user.role !== 'pastor';
+          
+          if (!matchesRole) return false;
+
+          // New search filter
+          const roleDisplayName = user.role === 'admin' ? 'Administrador' : 
+                                  user.role === 'pastor' ? 'Pastor' :
+                                  user.role === 'secretaria' ? 'Secretaria' :
+                                  user.role === 'cell' ? 'Celula' : 
+                                  user.role === 'membro' ? 'Membro' : 'Usuario';
+
+          const matchesSearch = user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                                roleDisplayName.toLowerCase().includes(searchTerm.toLowerCase());
+          
+          return matchesSearch;
         }).map((user) => (
           <motion.div
             key={user.id}

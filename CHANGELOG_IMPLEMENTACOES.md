@@ -10,6 +10,7 @@ Este arquivo documenta as funcionalidades implementadas até o momento para faci
   - **Secretaria:** Acesso a Principal, Lançamentos Financeiros, Relatórios Financeiros, Mural, Chat e listagem de usuários (exceto administradores e pastores).
   - **Membro:** Acesso restrito ao Mural e Chat.
 - **Status Online:** Indicador visual (bolinha verde para online, vermelha para offline) na listagem de usuários, visível para administradores.
+- **Pesquisa de Usuários:** Campo de busca na tela de usuários para filtrar por nome ou nível de acesso.
 
 ## 2. Configurações e Interface
 - **Zona de Perigo:** Visível e acessível apenas para administradores.

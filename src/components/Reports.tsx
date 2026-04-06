@@ -225,9 +225,16 @@ export default function Reports({ role }: ReportsProps) {
           <div className="relative">
             <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
             <input
-              type="date"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
+              type={reportMode === 'monthly' ? 'month' : 'date'}
+              value={reportMode === 'monthly' ? selectedDate.substring(0, 7) : selectedDate}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (reportMode === 'monthly') {
+                  setSelectedDate(val + '-01');
+                } else {
+                  setSelectedDate(val);
+                }
+              }}
               className="rounded-lg border border-zinc-200 bg-white py-2 pl-10 pr-4 outline-none focus:border-zinc-900"
             />
           </div>
@@ -278,7 +285,9 @@ export default function Reports({ role }: ReportsProps) {
           </div>
           <div className="text-right">
             <p className="text-sm font-bold text-zinc-400 uppercase tracking-wider">Periodo</p>
-            <p className="text-xl font-bold text-zinc-900 uppercase">{format(reportDate, 'dd/MM/yyyy', { locale: ptBR })}</p>
+            <p className="text-xl font-bold text-zinc-900 uppercase">
+              {reportMode === 'monthly' ? format(reportDate, 'MM/yyyy', { locale: ptBR }) : format(reportDate, 'dd/MM/yyyy', { locale: ptBR })}
+            </p>
           </div>
         </div>
 

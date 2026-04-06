@@ -9,7 +9,7 @@ Este arquivo documenta as funcionalidades implementadas até o momento para faci
   - **Pastor:** Acesso a tudo, exceto usuários administradores e a "Zona de Perigo".
   - **Secretaria:** Acesso a Principal, Lançamentos Financeiros, Relatórios Financeiros, Mural, Chat e listagem de usuários (exceto administradores e pastores).
   - **Membro:** Acesso restrito ao Mural e Chat.
-- **Status Online:** Indicador visual (bolinha verde para online, vermelha para offline) na listagem de usuários, visível para administradores.
+- **Status Online:** Indicador visual (bolinha verde para online, vermelha para offline) na listagem de usuários, visível para administradores. O tamanho do indicador foi aumentado para melhor visibilidade.
 - **Pesquisa de Usuários:** Campo de busca na tela de usuários para filtrar por nome ou nível de acesso.
 
 ## 2. Configurações e Interface
@@ -17,7 +17,10 @@ Este arquivo documenta as funcionalidades implementadas até o momento para faci
 - **Upload de Logo:** Campos dedicados para Logo da Igreja e QR Code.
 - **Backup e Restauração:** Seção dedicada nas configurações.
 
-## 3. Como replicar este projeto
+## 3. Relatórios
+- **Seletor de Período Inteligente:** O seletor de data agora alterna entre seleção de dia (modo diário) e mês (modo mensal), melhorando a usabilidade na geração de relatórios.
+
+## 4. Como replicar este projeto
 Ao iniciar um novo projeto no AI Studio, você pode usar este arquivo como roteiro. Basta pedir ao assistente:
 
 > "Leia o arquivo CHANGELOG_IMPLEMENTACOES.md e aplique todas as funcionalidades listadas neste novo projeto, mantendo a estrutura de papéis e permissões."

@@ -286,7 +286,7 @@ export default function Users() {
             <h3 className="text-lg font-bold text-zinc-900 flex items-center gap-2">
               {user.name}
               <div className={cn(
-                "h-2.5 w-2.5 rounded-full border-2 border-white",
+                "h-4 w-4 rounded-full border-2 border-white",
                 (user as any).status === 'online' ? "bg-emerald-500" : "bg-rose-500"
               )} title={(user as any).status === 'online' ? 'Online' : 'Offline'} />
             </h3>

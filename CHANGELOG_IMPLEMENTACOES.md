@@ -13,6 +13,10 @@ Este arquivo documenta as funcionalidades implementadas até o momento para faci
 - **Pesquisa de Usuários:** Campo de busca na tela de usuários para filtrar por nome ou nível de acesso.
 - **Chat:** Possibilidade de deletar mensagens individuais enviadas pelo próprio usuário (ícone de lixeira ao passar o mouse sobre a mensagem).
 - **Chat:** Suporte a emojis e envio de arquivos/imagens (upload para Firebase Storage).
+- **Chat (Melhorias):**
+  - **Notificação Privada:** Alerta visual (modal) quando uma mensagem privada é recebida, permitindo navegação rápida para a conversa.
+  - **Tratamento de Erros:** Exibição de mensagem amigável na tela caso o upload de arquivos falhe (devido a restrições de CORS).
+  - **Deleção Segura:** O botão "Apagar mensagens enviadas" agora deleta apenas as mensagens enviadas pelo próprio usuário logado, evitando erros de permissão.
 
 ## 2. Configurações e Interface
 - **Zona de Perigo:** Visível e acessível apenas para administradores.

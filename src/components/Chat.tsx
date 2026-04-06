@@ -182,7 +182,7 @@ export default function Chat() {
             </option>
           ))}
         </select>
-        <button onClick={handleClearChat} className="mt-2 text-xs text-red-500 hover:underline">Limpar conversa</button>
+        <button onClick={handleClearChat} className="mt-2 text-xs text-red-500 hover:underline">Apagar mensagens enviadas</button>
       </div>
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {privateMessageAlert && (
@@ -226,7 +226,7 @@ export default function Chat() {
           </div>
         )}
         {showEmojis && (
-          <div className="absolute bottom-16 left-4 bg-white border border-zinc-200 rounded-lg p-2 shadow-lg flex gap-2">
+          <div className="absolute bottom-16 left-4 bg-white border border-zinc-200 rounded-lg p-2 shadow-lg flex gap-2 z-50">
             {['😀', '😂', '😍', '👍', '🙏', '🔥'].map(emoji => (
               <button key={emoji} onClick={() => { setNewMessage(newMessage + emoji); setShowEmojis(false); }} className="text-xl hover:bg-zinc-100 p-1 rounded">{emoji}</button>
             ))}

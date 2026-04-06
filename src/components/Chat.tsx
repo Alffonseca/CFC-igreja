@@ -1,7 +1,8 @@
 import { useEffect, useState, useRef } from 'react';
 import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, or, where, deleteDoc, doc } from 'firebase/firestore';
-import { db, auth } from '../firebase';
-import { Send } from 'lucide-react';
+import { db, auth, storage } from '../firebase';
+import { Send, Trash2, Paperclip, Smile } from 'lucide-react';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 interface Message {
   id: string;
@@ -10,6 +11,7 @@ interface Message {
   senderUid: string;
   recipientUid?: string;
   createdAt: any;
+  fileUrl?: string;
 }
 
 interface User {
@@ -23,6 +25,8 @@ export default function Chat() {
   const [users, setUsers] = useState<User[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [recipientUid, setRecipientUid] = useState<string>('all');
+  const [showEmojis, setShowEmojis] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -93,9 +97,13 @@ export default function Chat() {
     }
   };
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newMessage.trim() || !auth.currentUser) return;
+  const handleDeleteMessage = async (messageId: string) => {
+    await deleteDoc(doc(db, 'messages', messageId));
+  };
+
+  const handleSendMessage = async (e?: React.FormEvent, fileUrl?: string) => {
+    if (e) e.preventDefault();
+    if ((!newMessage.trim() && !fileUrl) || !auth.currentUser) return;
     
     console.log('Chat: Enviando mensagem para:', recipientUid);
     const messageData: any = {
@@ -103,11 +111,23 @@ export default function Chat() {
       senderName: auth.currentUser.displayName || auth.currentUser.email?.split('@')[0] || 'Usuário',
       senderUid: auth.currentUser.uid,
       createdAt: serverTimestamp(),
-      recipientUid: recipientUid === 'all' ? 'public' : recipientUid
+      recipientUid: recipientUid === 'all' ? 'public' : recipientUid,
+      fileUrl: fileUrl || null
     };
     
     await addDoc(collection(db, 'messages'), messageData);
     setNewMessage('');
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !auth.currentUser) return;
+    
+    const storageRef = ref(storage, `chat/${auth.currentUser.uid}/${Date.now()}_${file.name}`);
+    await uploadBytes(storageRef, file);
+    const url = await getDownloadURL(storageRef);
+    
+    await handleSendMessage(undefined, url);
   };
 
   const filteredMessages = messages.filter(msg => {
@@ -138,15 +158,38 @@ export default function Chat() {
         {filteredMessages.map(message => (
           <div key={message.id} className={`flex flex-col ${message.senderUid === auth.currentUser?.uid ? 'items-end' : 'items-start'}`}>
             <span className="text-xs text-zinc-500">{message.senderName} {(!message.recipientUid || message.recipientUid === 'public') ? '(Público)' : '(Privado)'}</span>
-            <div className={`rounded-xl px-4 py-2 max-w-[80%] ${message.senderUid === auth.currentUser?.uid ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-900'}`}>
+            <div className={`group relative rounded-xl px-4 py-2 max-w-[80%] ${message.senderUid === auth.currentUser?.uid ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-900'}`}>
               {message.text}
+              {message.fileUrl && (
+                <a href={message.fileUrl} target="_blank" rel="noopener noreferrer" className="block mt-2 text-blue-500 underline">
+                  {message.fileUrl.includes('image') ? <img src={message.fileUrl} alt="Imagem" className="max-w-xs rounded-lg" /> : 'Ver arquivo'}
+                </a>
+              )}
+              {message.senderUid === auth.currentUser?.uid && (
+                <button 
+                  onClick={() => handleDeleteMessage(message.id)}
+                  className="absolute -left-6 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity text-zinc-400 hover:text-red-500"
+                >
+                  <Trash2 size={14} />
+                </button>
+              )}
             </div>
           </div>
         ))}
         <div ref={chatEndRef} />
       </div>
       <form onSubmit={handleSendMessage} className="border-t border-zinc-200 p-4 flex gap-2">
+        <button type="button" onClick={() => setShowEmojis(!showEmojis)} className="text-zinc-500 hover:text-zinc-900"><Smile size={20} /></button>
+        <button type="button" onClick={() => fileInputRef.current?.click()} className="text-zinc-500 hover:text-zinc-900"><Paperclip size={20} /></button>
+        <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
         <input type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="Digite sua mensagem..." className="flex-1 rounded-lg border border-zinc-200 px-4 py-2 outline-none" />
+        {showEmojis && (
+          <div className="absolute bottom-16 left-4 bg-white border border-zinc-200 rounded-lg p-2 shadow-lg flex gap-2">
+            {['😀', '😂', '😍', '👍', '🙏', '🔥'].map(emoji => (
+              <button key={emoji} onClick={() => { setNewMessage(newMessage + emoji); setShowEmojis(false); }} className="text-xl hover:bg-zinc-100 p-1 rounded">{emoji}</button>
+            ))}
+          </div>
+        )}
         <button type="submit" className="rounded-lg bg-zinc-900 px-4 py-2 text-white hover:bg-zinc-800">
           <Send size={20} />
         </button>

@@ -11,6 +11,8 @@ Este arquivo documenta as funcionalidades implementadas até o momento para faci
   - **Membro:** Acesso restrito ao Mural e Chat.
 - **Status Online:** Indicador visual (bolinha verde para online, vermelha para offline) na listagem de usuários, visível para administradores. O tamanho do indicador foi aumentado para melhor visibilidade.
 - **Pesquisa de Usuários:** Campo de busca na tela de usuários para filtrar por nome ou nível de acesso.
+- **Chat:** Possibilidade de deletar mensagens individuais enviadas pelo próprio usuário (ícone de lixeira ao passar o mouse sobre a mensagem).
+- **Chat:** Suporte a emojis e envio de arquivos/imagens (upload para Firebase Storage).
 
 ## 2. Configurações e Interface
 - **Zona de Perigo:** Visível e acessível apenas para administradores.
@@ -20,7 +22,10 @@ Este arquivo documenta as funcionalidades implementadas até o momento para faci
 ## 3. Relatórios
 - **Seletor de Período Inteligente:** O seletor de data agora alterna entre seleção de dia (modo diário) e mês (modo mensal), melhorando a usabilidade na geração de relatórios.
 
-## 4. Como replicar este projeto
+## 5. Segurança
+- **Hardening de Regras de Segurança:** Implementação de regras de segurança mais robustas no Firestore, incluindo validação de campos, proteção de campos imutáveis e controle de acesso baseado em papéis (RBAC).
+
+## 6. Como replicar este projeto
 Ao iniciar um novo projeto no AI Studio, você pode usar este arquivo como roteiro. Basta pedir ao assistente:
 
 > "Leia o arquivo CHANGELOG_IMPLEMENTACOES.md e aplique todas as funcionalidades listadas neste novo projeto, mantendo a estrutura de papéis e permissões."

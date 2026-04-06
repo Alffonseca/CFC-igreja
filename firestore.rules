@@ -11,7 +11,7 @@ service cloud.firestore {
     //   - uid: string (required)
     //   - name: string (required)
     //   - email: string (required)
-    //   - role: string (required, 'admin' or 'user')
+    //   - role: string (required, 'admin', 'user', 'pastor', 'secretaria', 'cell', 'membro')
     //   - createdAt: timestamp (required)
     //
     // Collection: transactions
@@ -22,7 +22,6 @@ service cloud.firestore {
     //   - date: string (required, ISO date)
     //   - description: string (required)
     //   - category: string (optional)
-    //   - notes: string (optional)
     //   - createdBy: string (required)
     //   - createdAt: timestamp (required)
     //
@@ -31,6 +30,7 @@ service cloud.firestore {
     // Fields:
     //   - name: string (required)
     //   - logoUrl: string (optional)
+    //   - pastorName: string (optional)
     //
     // Collection: cells
     // Document ID: cellId
@@ -40,6 +40,27 @@ service cloud.firestore {
     //   - memberCount: number (required, non-negative)
     //   - conversions: number (required, non-negative)
     //   - createdBy: string (required)
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: meetings
+    // Document ID: meetingId
+    // Fields:
+    //   - cellId: string (required)
+    //   - date: string (required, ISO date)
+    //   - membersPresent: number (required, non-negative)
+    //   - visitors: number (required, non-negative)
+    //   - conversions: number (required, non-negative)
+    //   - baptisms: number (required, non-negative)
+    //   - createdBy: string (required)
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: messages
+    // Document ID: messageId
+    // Fields:
+    //   - text: string (required)
+    //   - senderName: string (required)
+    //   - senderUid: string (required)
+    //   - recipientUid: string (optional)
     //   - createdAt: timestamp (required)
     //
     // ===============================================================
@@ -52,29 +73,43 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isAuthenticated() && (
-        request.auth.token.email == "emailparasiteslixo@gmail.com" ||
-        request.auth.token.email == "emailparasiteslixo@gestao.igreja" ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin")
-      );
+      return isAuthenticated() && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
     }
 
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function areImmutableFieldsUnchanged(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
     function isValidUser(data) {
-      return data.keys().hasAll(['uid', 'name', 'email', 'role', 'createdAt']) &&
+      return hasRequiredFields(['uid', 'name', 'email', 'role', 'createdAt']) &&
+             hasOnlyAllowedFields(['uid', 'name', 'email', 'role', 'createdAt', 'status', 'lastSeen']) &&
              data.uid is string &&
              data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
              data.email is string && data.email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$") &&
-             data.role in ['admin', 'user', 'cell', 'pre-admin'] &&
+             data.role in ['admin', 'user', 'pastor', 'secretaria', 'cell', 'membro'] &&
              data.createdAt is timestamp;
     }
 
     function isValidTransaction(data) {
-      return data.keys().hasAll(['type', 'amount', 'date', 'description', 'createdBy', 'createdAt']) &&
+      return hasRequiredFields(['type', 'amount', 'date', 'description', 'createdBy', 'createdAt']) &&
+             hasOnlyAllowedFields(['type', 'amount', 'date', 'description', 'category', 'notes', 'createdBy', 'createdAt']) &&
              data.type in ['tithe', 'offering', 'expense'] &&
              data.amount is number && data.amount > 0 &&
              data.date is string &&
@@ -84,14 +119,16 @@ service cloud.firestore {
     }
 
     function isValidSettings(data) {
-      return data.keys().hasAll(['name']) &&
+      return hasRequiredFields(['name']) &&
+             hasOnlyAllowedFields(['name', 'logoUrl', 'pastorName']) &&
              data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
              (!('pastorName' in data) || (data.pastorName is string && data.pastorName.size() < 200)) &&
              (!('logoUrl' in data) || (data.logoUrl is string && data.logoUrl.size() < 1000));
     }
 
     function isValidCell(data) {
-      return data.keys().hasAll(['name', 'leader', 'memberCount', 'conversions', 'createdBy', 'createdAt']) &&
+      return hasRequiredFields(['name', 'leader', 'memberCount', 'conversions', 'createdBy', 'createdAt']) &&
+             hasOnlyAllowedFields(['name', 'leader', 'memberCount', 'conversions', 'createdBy', 'createdAt', 'leaderId']) &&
              data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
              data.leader is string && data.leader.size() > 0 && data.leader.size() < 200 &&
              data.memberCount is number && data.memberCount >= 0 &&
@@ -100,18 +137,21 @@ service cloud.firestore {
              data.createdAt is timestamp;
     }
 
-    function isValidActivity(data) {
-      return data.keys().hasAll(['title', 'type', 'createdBy', 'createdAt']) &&
-             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
-             data.type in ['image', 'video', 'link'] &&
-             (!('url' in data) || (data.url is string && data.url.size() < 1000)) &&
-             (!('description' in data) || (data.description is string && data.description.size() < 1000)) &&
+    function isValidMeeting(data) {
+      return hasRequiredFields(['cellId', 'date', 'membersPresent', 'visitors', 'conversions', 'baptisms', 'createdBy', 'createdAt']) &&
+             hasOnlyAllowedFields(['cellId', 'date', 'membersPresent', 'visitors', 'conversions', 'baptisms', 'createdBy', 'createdAt', 'acceptedJesus', 'wantBaptism']) &&
+             data.date is string &&
+             data.membersPresent is number && data.membersPresent >= 0 &&
+             data.visitors is number && data.visitors >= 0 &&
+             data.conversions is number && data.conversions >= 0 &&
+             data.baptisms is number && data.baptisms >= 0 &&
              data.createdBy == request.auth.uid &&
              data.createdAt is timestamp;
     }
 
     function isValidMessage(data) {
-      return data.keys().hasAll(['text', 'senderName', 'senderUid', 'createdAt']) &&
+      return hasRequiredFields(['text', 'senderName', 'senderUid', 'createdAt']) &&
+             hasOnlyAllowedFields(['text', 'senderName', 'senderUid', 'createdAt', 'recipientUid']) &&
              data.text is string && data.text.size() > 0 && data.text.size() < 1000 &&
              data.senderName is string && data.senderName.size() > 0 &&
              data.senderUid == request.auth.uid &&
@@ -123,20 +163,17 @@ service cloud.firestore {
     // Rules
     // ===============================================================
 
-    function isRegistered() {
-      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
-    }
-
     match /users/{userId} {
-      allow read: if isRegistered();
-      allow create: if isAuthenticated() && isAdmin();
-      allow update: if isAuthenticated() && (isAdmin() || request.auth.uid == userId);
+      allow read: if isAuthenticated(); // PII risk, but needed for app functionality. Denormalize if possible.
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (isOwner(userId) || isAdmin());
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && (isOwner(userId) || isAdmin()) && areImmutableFieldsUnchanged(['uid', 'createdAt']);
       allow delete: if isAuthenticated() && isAdmin();
     }
 
     match /transactions/{transactionId} {
-      allow read: if isRegistered();
-      allow write: if isAuthenticated() && isAdmin();
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidTransaction(request.resource.data);
+      allow update: if isAuthenticated() && isValidTransaction(request.resource.data) && areImmutableFieldsUnchanged(['createdBy', 'createdAt']);
       allow delete: if isAuthenticated() && isAdmin();
     }
 
@@ -146,42 +183,23 @@ service cloud.firestore {
     }
 
     match /cells/{cellId} {
-      allow read: if isRegistered();
-      allow write: if isRegistered();
-      allow delete: if isAdmin();
-    }
-
-    match /meetings/{meetingId} {
-      allow read: if isRegistered();
-      allow write: if isRegistered();
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidCell(request.resource.data);
+      allow update: if isAuthenticated() && isValidCell(request.resource.data) && areImmutableFieldsUnchanged(['createdBy', 'createdAt']);
       allow delete: if isAuthenticated() && isAdmin();
     }
 
-    match /test_connection/{userId} {
-      allow write: if isAuthenticated() && (isOwner(userId) || isAdmin() || request.auth.token.email == "emailparasiteslixo@gmail.com");
-    }
-
-    match /logs/{logId} {
-      allow read: if isAdmin();
-      allow write: if isAuthenticated();
-    }
-
-    match /activities/{activityId} {
-      allow read: if isRegistered();
-      allow create: if isRegistered() && isValidActivity(request.resource.data);
-      allow update: if isRegistered() && isValidActivity(request.resource.data) && request.resource.data.createdBy == resource.data.createdBy;
-      allow delete: if isAdmin() || (isRegistered() && request.auth.uid == resource.data.createdBy);
+    match /meetings/{meetingId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidMeeting(request.resource.data);
+      allow update: if isAuthenticated() && isValidMeeting(request.resource.data) && areImmutableFieldsUnchanged(['createdBy', 'createdAt']);
+      allow delete: if isAuthenticated() && isAdmin();
     }
 
     match /messages/{messageId} {
-      allow read: if isRegistered() && (
-        isAdmin() ||
-        resource.data.recipientUid == request.auth.uid || 
-        resource.data.senderUid == request.auth.uid ||
-        resource.data.recipientUid == null ||
-        resource.data.recipientUid == 'public'
-      );
-      allow create: if isRegistered() && isValidMessage(request.resource.data);
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidMessage(request.resource.data);
+      allow delete: if isAuthenticated() && (isAdmin() || request.auth.uid == resource.data.senderUid);
     }
   }
 }

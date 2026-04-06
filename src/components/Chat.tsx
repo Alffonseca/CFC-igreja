@@ -97,9 +97,10 @@ export default function Chat() {
   }, [messages]);
 
   const handleClearChat = async () => {
-    // Removido o confirm() pois ele não funciona dentro do iframe
+    // Filtra apenas as mensagens enviadas pelo usuário logado para deleção
+    const myMessages = filteredMessages.filter(msg => msg.senderUid === auth.currentUser?.uid);
     
-    for (const msg of filteredMessages) {
+    for (const msg of myMessages) {
       try {
         await deleteDoc(doc(db, 'messages', msg.id));
       } catch (error) {

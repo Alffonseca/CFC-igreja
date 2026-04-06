@@ -41,7 +41,17 @@ export default function Users() {
   useEffect(() => {
     const q = query(collection(db, 'users'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as UserProfile));
+      const now = new Date().getTime();
+      const data = snapshot.docs.map(doc => {
+        const userData = doc.data();
+        const lastSeen = userData.lastSeen?.toDate().getTime() || 0;
+        const isOnline = (now - lastSeen) < 5 * 60 * 1000; // 5 minutos
+        return { 
+          id: doc.id, 
+          ...userData, 
+          status: isOnline ? 'online' : 'offline' 
+        } as UserProfile & { status: string };
+      });
       setUsers(data);
       
       const myProfile = data.find(u => u.uid === auth.currentUser?.uid || u.id === auth.currentUser?.uid);

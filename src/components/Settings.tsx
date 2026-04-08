@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase';
-import { Save, Image as ImageIcon, Church, Upload } from 'lucide-react';
-import { motion } from 'motion/react';
+import { Save, Image as ImageIcon, Church, Upload, X } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import BackupRestore from './BackupRestore';
 import ResetData from './ResetData';
 import { logAction } from '../lib/logger';
@@ -14,6 +14,7 @@ interface ChurchSettings {
   pastorName?: string;
   qrCodeUrl?: string;
   titheMessage?: string;
+  destinations?: string[];
 }
 
 interface SettingsProps {
@@ -21,11 +22,13 @@ interface SettingsProps {
 }
 
 export default function Settings({ role }: SettingsProps) {
-  const [settings, setSettings] = useState<ChurchSettings>({ name: '', logoUrl: '', pastorName: '', qrCodeUrl: '', titheMessage: '' });
+  const [settings, setSettings] = useState<ChurchSettings>({ name: '', logoUrl: '', pastorName: '', qrCodeUrl: '', titheMessage: '', destinations: [] });
+  const [newDestination, setNewDestination] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [imageLoading, setImageLoading] = useState(true);
+  const [pendingAction, setPendingAction] = useState<boolean>(false);
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -81,15 +84,17 @@ export default function Settings({ role }: SettingsProps) {
     }
   };
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSave = async () => {
     setSaving(true);
     try {
       const timeoutPromise = new Promise((_, reject) => 
         setTimeout(() => reject(new Error('Tempo de salvamento esgotado (10s)')), 10000)
       );
 
-      const savePromise = setDoc(doc(db, 'settings', 'church'), settings);
+      const savePromise = setDoc(doc(db, 'settings', 'church'), {
+        ...settings,
+        destinations: settings.destinations || []
+      });
       console.log('Salvando configuracoes:', settings);
       await Promise.race([savePromise, timeoutPromise]);
       
@@ -100,6 +105,7 @@ export default function Settings({ role }: SettingsProps) {
       alert(`Erro ao salvar configuracoes: ${err.message || 'Erro desconhecido'}`);
     } finally {
       setSaving(false);
+      setPendingAction(false);
     }
   };
 
@@ -116,7 +122,7 @@ export default function Settings({ role }: SettingsProps) {
         <motion.form
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          onSubmit={handleSave}
+          onSubmit={(e) => { e.preventDefault(); setPendingAction(true); }}
           className="rounded-2xl bg-white p-8 shadow-sm ring-1 ring-zinc-200"
         >
           <div className="space-y-6">
@@ -179,11 +185,19 @@ export default function Settings({ role }: SettingsProps) {
                         setUploading(true);
                         try {
                           const storageRef = ref(storage, `church/qr_${Date.now()}`);
-                          await uploadBytes(storageRef, file);
+                          
+                          const timeoutPromise = new Promise((_, reject) => 
+                            setTimeout(() => reject(new Error('Tempo de upload esgotado (120s)')), 120000)
+                          );
+
+                          const uploadPromise = uploadBytes(storageRef, file);
+                          await Promise.race([uploadPromise, timeoutPromise]);
+                          
                           const url = await getDownloadURL(storageRef);
                           setSettings(prev => ({ ...prev, qrCodeUrl: url }));
                           alert('QR Code carregado com sucesso!');
                         } catch (err: any) {
+                          console.error('Erro no upload do QR Code:', err);
                           alert('Erro ao fazer upload do QR Code: ' + err.message);
                         } finally {
                           setUploading(false);
@@ -229,6 +243,45 @@ export default function Settings({ role }: SettingsProps) {
               />
             </div>
 
+            <div className="space-y-2">
+              <label className="text-sm font-bold uppercase tracking-wider text-zinc-500">Destinos Disponíveis</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newDestination}
+                  onChange={(e) => setNewDestination(e.target.value)}
+                  className="flex-1 rounded-lg border border-zinc-200 bg-zinc-50 py-2.5 px-4 outline-none transition-all focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10"
+                  placeholder="Ex: Banco do Brasil"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (newDestination.trim()) {
+                      setSettings(prev => ({ ...prev, destinations: [...(prev.destinations || []), newDestination.trim()] }));
+                      setNewDestination('');
+                    }
+                  }}
+                  className="rounded-lg bg-zinc-900 px-4 py-2.5 font-semibold text-white hover:bg-zinc-800"
+                >
+                  Adicionar
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2 pt-2">
+                {settings.destinations?.map((dest, index) => (
+                  <div key={index} className="flex items-center gap-2 rounded-full bg-zinc-100 px-3 py-1 text-sm text-zinc-700">
+                    {dest}
+                    <button
+                      type="button"
+                      onClick={() => setSettings(prev => ({ ...prev, destinations: prev.destinations?.filter((_, i) => i !== index) }))}
+                      className="text-zinc-400 hover:text-rose-600"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             {settings.qrCodeUrl && (
               <div className="rounded-xl bg-zinc-50 p-4 text-center">
                 <p className="mb-2 text-xs font-bold uppercase tracking-widest text-zinc-400">Previa do QR Code</p>
@@ -251,6 +304,43 @@ export default function Settings({ role }: SettingsProps) {
             </button>
           </div>
         </motion.form>
+        <AnimatePresence>
+          {pendingAction && (
+            <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setPendingAction(false)}
+                className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="relative w-full max-w-sm rounded-2xl bg-white p-8 shadow-2xl text-center"
+              >
+                <h2 className="text-xl font-bold text-zinc-900 mb-4">Confirmar alterações?</h2>
+                <p className="text-zinc-500 mb-8">Tem certeza que deseja salvar as novas configurações?</p>
+                <div className="flex gap-4">
+                  <button
+                    onClick={() => setPendingAction(false)}
+                    className="flex-1 rounded-lg bg-zinc-100 py-2.5 font-semibold text-zinc-700 hover:bg-zinc-200"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={handleSave}
+                    disabled={saving}
+                    className="flex-1 rounded-lg bg-zinc-900 py-2.5 font-semibold text-white hover:bg-zinc-800"
+                  >
+                    {saving ? 'Salvando...' : 'Confirmar'}
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
         <BackupRestore />
         {role === 'admin' && <ResetData />}
       </div>

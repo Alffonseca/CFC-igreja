@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { collection, query, onSnapshot, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, orderBy } from 'firebase/firestore';
+import { collection, query, onSnapshot, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, orderBy, getDoc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Plus, Edit2, Trash2, Search, Filter, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -15,6 +15,7 @@ interface Transaction {
   amount: number;
   date: string;
   description: string;
+  destination?: string;
   category?: string;
   notes?: string;
   createdBy: string;
@@ -23,11 +24,13 @@ interface Transaction {
 
 export default function Transactions() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [destinations, setDestinations] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'tithe' | 'offering' | 'expense'>('all');
+  const [filterDestination, setFilterDestination] = useState<string>('all');
 
   // Form state
   const [formData, setFormData] = useState({
@@ -35,6 +38,7 @@ export default function Transactions() {
     amount: '',
     date: format(new Date(), 'yyyy-MM-dd'),
     description: '',
+    destination: '',
     category: '',
     notes: ''
   });
@@ -47,63 +51,82 @@ export default function Transactions() {
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    const fetchSettings = () => {
+      return onSnapshot(doc(db, 'settings', 'church'), (sDoc) => {
+        if (sDoc.exists()) {
+          setDestinations(sDoc.data().destinations || []);
+        }
+      });
+    };
+    const unsubscribeSettings = fetchSettings();
+
+    return () => {
+      unsubscribe();
+      unsubscribeSettings();
+    };
   }, []);
+
+  const [pendingAction, setPendingAction] = useState<{ type: 'create' | 'update' | 'delete', data?: any, id?: string } | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!auth.currentUser) return;
+    setPendingAction({ type: editingTransaction ? 'update' : 'create', data: formData });
+    setIsModalOpen(false);
+  };
 
-    const data = {
-      ...formData,
-      amount: parseFloat(formData.amount),
-      createdBy: auth.currentUser.uid,
-      createdAt: serverTimestamp()
-    };
+  const executeAction = async () => {
+    if (!pendingAction || !auth.currentUser) return;
+    setSubmitting(true);
+    const { type, data, id } = pendingAction;
 
     try {
-      if (editingTransaction) {
-        await updateDoc(doc(db, 'transactions', editingTransaction.id), data);
+      if (type === 'update' && editingTransaction) {
+        await updateDoc(doc(db, 'transactions', editingTransaction.id), {
+          ...data,
+          destination: data.destination || '',
+          amount: parseFloat(data.amount),
+          createdBy: auth.currentUser.uid,
+          createdAt: serverTimestamp()
+        });
         await logAction('Editar Lancamento', `Editou lancamento: ${data.description} (${data.type})`);
-      } else {
-        await addDoc(collection(db, 'transactions'), data);
+      } else if (type === 'create') {
+        await addDoc(collection(db, 'transactions'), {
+          ...data,
+          destination: data.destination || '',
+          amount: parseFloat(data.amount),
+          createdBy: auth.currentUser.uid,
+          createdAt: serverTimestamp()
+        });
         await logAction('Novo Lancamento', `Criou novo lancamento: ${data.description} (${data.type})`);
+      } else if (type === 'delete' && id) {
+        const transaction = transactions.find(t => t.id === id);
+        await deleteDoc(doc(db, 'transactions', id));
+        await logAction('Excluir Lancamento', `Excluiu lancamento: ${transaction?.description} (${transaction?.type})`);
+        alert('Lancamento excluido com sucesso!');
       }
-      setIsModalOpen(false);
+      
       setEditingTransaction(null);
       setFormData({
         type: 'tithe',
         amount: '',
         date: format(new Date(), 'yyyy-MM-dd'),
         description: '',
+        destination: '',
         category: '',
         notes: ''
       });
     } catch (err) {
       console.error(err);
-      alert('Erro ao salvar lancamento.');
+      alert('Erro ao realizar operacao.');
+    } finally {
+      setSubmitting(false);
+      setPendingAction(null);
     }
   };
-
-  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const handleDelete = async (id: string) => {
-    setDeleteId(id);
-  };
-
-  const confirmDelete = async () => {
-    if (!deleteId) return;
-    try {
-      const transaction = transactions.find(t => t.id === deleteId);
-      await deleteDoc(doc(db, 'transactions', deleteId));
-      await logAction('Excluir Lancamento', `Excluiu lancamento: ${transaction?.description} (${transaction?.type})`);
-      alert('Lancamento excluido com sucesso!');
-    } catch (err: any) {
-      console.error('Erro ao excluir lancamento:', err);
-      alert('Erro ao excluir lancamento: ' + err.message);
-    } finally {
-      setDeleteId(null);
-    }
+    setPendingAction({ type: 'delete', id });
   };
 
   const openEdit = (t: Transaction) => {
@@ -113,6 +136,7 @@ export default function Transactions() {
       amount: t.amount.toString(),
       date: t.date,
       description: t.description,
+      destination: t.destination || '',
       category: t.category || '',
       notes: t.notes || ''
     });
@@ -120,9 +144,11 @@ export default function Transactions() {
   };
 
   const filteredTransactions = transactions.filter(t => {
-    const matchesSearch = t.description.toLowerCase().includes(search.toLowerCase());
+    const matchesSearch = t.description.toLowerCase().includes(search.toLowerCase()) || 
+                          (t.destination && t.destination.toLowerCase().includes(search.toLowerCase()));
     const matchesType = filterType === 'all' || t.type === filterType;
-    return matchesSearch && matchesType;
+    const matchesDestination = filterDestination === 'all' || t.destination === filterDestination;
+    return matchesSearch && matchesType && matchesDestination;
   });
 
   return (
@@ -140,6 +166,7 @@ export default function Transactions() {
               amount: '',
               date: format(new Date(), 'yyyy-MM-dd'),
               description: '',
+              destination: '',
               category: '',
               notes: ''
             });
@@ -170,10 +197,18 @@ export default function Transactions() {
             onChange={(e) => setFilterType(e.target.value as any)}
             className="rounded-lg border border-zinc-200 bg-white py-2 pl-3 pr-8 outline-none focus:border-zinc-900"
           >
-            <option value="all">Todos</option>
+            <option value="all">Todos os tipos</option>
             <option value="tithe">Dízimos</option>
             <option value="offering">Ofertas</option>
             <option value="expense">Despesas</option>
+          </select>
+          <select
+            value={filterDestination}
+            onChange={(e) => setFilterDestination(e.target.value)}
+            className="rounded-lg border border-zinc-200 bg-white py-2 pl-3 pr-8 outline-none focus:border-zinc-900"
+          >
+            <option value="all">Todos os destinos</option>
+            {destinations.map(dest => <option key={dest} value={dest}>{dest}</option>)}
           </select>
         </div>
       </div>
@@ -183,6 +218,7 @@ export default function Transactions() {
           <thead className="bg-zinc-50 text-xs font-semibold uppercase tracking-wider text-zinc-500">
             <tr>
               <th className="px-6 py-4">Data</th>
+              <th className="px-6 py-4">Destino</th>
               <th className="px-6 py-4">Descricao</th>
               <th className="px-6 py-4">Tipo</th>
               <th className="px-6 py-4">Valor</th>
@@ -193,6 +229,7 @@ export default function Transactions() {
             {filteredTransactions.map((t) => (
               <tr key={t.id} className="group hover:bg-zinc-50/50">
                 <td className="px-6 py-4 text-sm text-zinc-600">{format(new Date(t.date), 'dd/MM/yyyy')}</td>
+                <td className="px-6 py-4 text-sm text-zinc-600">{t.destination || '-'}</td>
                 <td className="px-6 py-4">
                   <p className="text-sm font-medium text-zinc-900">{t.description}</p>
                   {t.notes && <p className="text-xs text-zinc-400">{t.notes}</p>}
@@ -224,7 +261,7 @@ export default function Transactions() {
             ))}
             {filteredTransactions.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-6 py-12 text-center text-zinc-500">Nenhum lançamento encontrado.</td>
+                <td colSpan={6} className="px-6 py-12 text-center text-zinc-500">Nenhum lançamento encontrado.</td>
               </tr>
             )}
           </tbody>
@@ -286,6 +323,18 @@ export default function Transactions() {
                 </div>
 
                 <div className="space-y-1">
+                  <label className="text-xs font-bold uppercase tracking-wider text-zinc-500">Destino</label>
+                  <select
+                    value={formData.destination}
+                    onChange={(e) => setFormData({ ...formData, destination: e.target.value })}
+                    className="w-full rounded-lg border border-zinc-200 bg-zinc-50 p-2.5 outline-none focus:ring-2 focus:ring-zinc-900/10"
+                  >
+                    <option value="">Selecione um destino...</option>
+                    {destinations.map(dest => <option key={dest} value={dest}>{dest}</option>)}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
                   <label className="text-xs font-bold uppercase tracking-wider text-zinc-500">Data</label>
                   <input
                     type="date"
@@ -343,41 +392,52 @@ export default function Transactions() {
           </div>
         )}
       </AnimatePresence>
-      {deleteId && createPortal(
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setDeleteId(null)}
-            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-          />
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            className="relative w-full max-w-sm rounded-2xl bg-white p-8 shadow-2xl text-center"
-          >
-            <h2 className="text-xl font-bold text-zinc-900 mb-4">Excluir Lançamento?</h2>
-            <p className="text-zinc-500 mb-8">Esta ação não pode ser desfeita.</p>
-            <div className="flex gap-4">
-              <button
-                onClick={() => setDeleteId(null)}
-                className="flex-1 rounded-lg bg-zinc-100 py-2.5 font-semibold text-zinc-700 hover:bg-zinc-200"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={confirmDelete}
-                className="flex-1 rounded-lg bg-rose-600 py-2.5 font-semibold text-white hover:bg-rose-700"
-              >
-                Excluir
-              </button>
-            </div>
-          </motion.div>
-        </div>,
-        document.body
-      )}
+      {/* Modal de Confirmação */}
+      <AnimatePresence>
+        {pendingAction && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setPendingAction(null)}
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="relative w-full max-w-sm rounded-2xl bg-white p-8 shadow-2xl text-center"
+            >
+              <h2 className="text-xl font-bold text-zinc-900 mb-4">
+                Confirmar {pendingAction.type === 'create' ? 'criação' : pendingAction.type === 'update' ? 'alteração' : 'exclusão'}?
+              </h2>
+              <p className="text-zinc-500 mb-8">
+                Tem certeza que deseja {pendingAction.type === 'create' ? 'criar' : pendingAction.type === 'update' ? 'alterar' : 'excluir'} este lançamento?
+              </p>
+              <div className="flex gap-4">
+                <button
+                  onClick={() => setPendingAction(null)}
+                  className="flex-1 rounded-lg bg-zinc-100 py-2.5 font-semibold text-zinc-700 hover:bg-zinc-200"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={executeAction}
+                  disabled={submitting}
+                  className={cn(
+                    "flex-1 rounded-lg py-2.5 font-semibold text-white",
+                    pendingAction.type === 'delete' ? "bg-rose-600 hover:bg-rose-700" : "bg-zinc-900 hover:bg-zinc-800",
+                    submitting && "opacity-50"
+                  )}
+                >
+                  {submitting ? 'Salvando...' : 'Confirmar'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

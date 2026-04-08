@@ -32,7 +32,6 @@ export default function Cells() {
   const [editingCell, setEditingCell] = useState<Cell | null>(null);
   const [activeTab, setActiveTab] = useState<'cells' | 'meetings'>('cells');
   const [meetings, setMeetings] = useState<any[]>([]);
-  const [submitting, setSubmitting] = useState(false);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -133,128 +132,108 @@ export default function Cells() {
 
   const [editingMeeting, setEditingMeeting] = useState<any>(null);
 
-  const handleMeetingSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedCellId && !editingMeeting) return;
-
-    setSubmitting(true);
-    try {
-      const data = {
-        cellId: editingMeeting ? editingMeeting.cellId : selectedCellId,
-        ...meetingData,
-        members: meetingData.members.split('\n').filter(s => s.trim() !== ''),
-        acceptedJesus: meetingData.acceptedJesus.split('\n').filter(s => s.trim() !== ''),
-        wantBaptism: meetingData.wantBaptism.split('\n').filter(s => s.trim() !== ''),
-        updatedAt: serverTimestamp()
-      };
-
-      if (editingMeeting) {
-        await updateDoc(doc(db, 'meetings', editingMeeting.id), data);
-        await logAction('Editar Reuniao', `Editou reuniao da celula ID: ${data.cellId}`);
-        alert('Reuniao atualizada com sucesso!');
-      } else {
-        await addDoc(collection(db, 'meetings'), {
-          ...data,
-          createdAt: serverTimestamp()
-        });
-        await logAction('Nova Reuniao', `Registrou nova reuniao para celula ID: ${data.cellId}`);
-        alert('Reuniao registrada com sucesso!');
-      }
-      setIsMeetingModalOpen(false);
-      setEditingMeeting(null);
-      setMeetingData({ 
-        date: new Date().toISOString().split('T')[0], 
-        membersPresent: 0, 
-        visitors: 0, 
-        conversions: 0, 
-        baptisms: 0, 
-        members: '',
-        acceptedJesus: '',
-        wantBaptism: ''
-      });
-    } catch (err) {
-      console.error('Erro ao salvar reuniao:', err);
-      alert('Erro ao salvar reuniao.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  const [pendingAction, setPendingAction] = useState<{ type: 'create' | 'update' | 'delete', entity: 'cell' | 'meeting', data?: any, id?: string } | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!auth.currentUser) return;
-    
-    setSubmitting(true);
-    try {
-      const cellData = {
-        name: formData.name,
-        leader: formData.leader,
-        leaderId: formData.leaderId,
-        memberCount: Number(formData.memberCount),
-        conversions: Number(formData.conversions),
-        members: formData.members.split('\n').filter(s => s.trim() !== ''),
-        acceptedJesus: formData.acceptedJesus.split('\n').filter(s => s.trim() !== ''),
-        wantBaptism: formData.wantBaptism.split('\n').filter(s => s.trim() !== ''),
-      };
+    setPendingAction({ type: editingCell ? 'update' : 'create', entity: 'cell', data: formData });
+    setIsModalOpen(false);
+  };
 
-      if (editingCell) {
-        await updateDoc(doc(db, 'cells', editingCell.id), cellData);
-        await logAction('Editar Celula', `Editou celula: ${cellData.name}`);
-      } else {
-        await addDoc(collection(db, 'cells'), {
-          ...cellData,
-          leaderId: formData.leaderId || auth.currentUser.uid,
-          createdBy: auth.currentUser.uid,
-          createdAt: serverTimestamp()
+  const handleMeetingSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPendingAction({ type: editingMeeting ? 'update' : 'create', entity: 'meeting', data: meetingData, id: editingMeeting?.id });
+    setIsMeetingModalOpen(false);
+  };
+
+  const executeAction = async () => {
+    if (!pendingAction || !auth.currentUser) return;
+    setSubmitting(true);
+    const { type, entity, data, id } = pendingAction;
+
+    try {
+      if (entity === 'cell') {
+        const cellData = {
+          name: data.name,
+          leader: data.leader,
+          leaderId: data.leaderId,
+          memberCount: Number(data.memberCount),
+          conversions: Number(data.conversions),
+          members: data.members.split('\n').filter((s: string) => s.trim() !== ''),
+          acceptedJesus: data.acceptedJesus.split('\n').filter((s: string) => s.trim() !== ''),
+          wantBaptism: data.wantBaptism.split('\n').filter((s: string) => s.trim() !== ''),
+        };
+
+        if (type === 'update' && editingCell) {
+          await updateDoc(doc(db, 'cells', editingCell.id), cellData);
+          await logAction('Editar Celula', `Editou celula: ${cellData.name}`);
+        } else if (type === 'create') {
+          await addDoc(collection(db, 'cells'), {
+            ...cellData,
+            leaderId: data.leaderId || auth.currentUser.uid,
+            createdBy: auth.currentUser.uid,
+            createdAt: serverTimestamp()
+          });
+          await logAction('Nova Celula', `Criou nova celula: ${cellData.name}`);
+        }
+        setEditingCell(null);
+        setFormData({ name: '', leader: '', leaderId: '', memberCount: 0, conversions: 0, members: '', acceptedJesus: '', wantBaptism: '' });
+      } else if (entity === 'meeting') {
+        const meetingDataFormatted = {
+          cellId: editingMeeting ? editingMeeting.cellId : selectedCellId,
+          ...data,
+          membersPresent: Number(data.membersPresent),
+          visitors: Number(data.visitors),
+          conversions: Number(data.conversions),
+          baptisms: Number(data.baptisms),
+          members: data.members.split('\n').filter((s: string) => s.trim() !== ''),
+          acceptedJesus: data.acceptedJesus.split('\n').filter((s: string) => s.trim() !== ''),
+          wantBaptism: data.wantBaptism.split('\n').filter((s: string) => s.trim() !== ''),
+          updatedAt: serverTimestamp()
+        };
+
+        if (type === 'update' && id) {
+          await updateDoc(doc(db, 'meetings', id), meetingDataFormatted);
+          await logAction('Editar Reuniao', `Editou reuniao da celula ID: ${meetingDataFormatted.cellId}`);
+          alert('Reuniao atualizada com sucesso!');
+        } else if (type === 'create') {
+          await addDoc(collection(db, 'meetings'), {
+            ...meetingDataFormatted,
+            createdAt: serverTimestamp()
+          });
+          await logAction('Nova Reuniao', `Registrou nova reuniao para celula ID: ${meetingDataFormatted.cellId}`);
+          alert('Reuniao registrada com sucesso!');
+        }
+        setEditingMeeting(null);
+        setMeetingData({ 
+          date: new Date().toISOString().split('T')[0], 
+          membersPresent: 0, 
+          visitors: 0, 
+          conversions: 0, 
+          baptisms: 0, 
+          members: '',
+          acceptedJesus: '',
+          wantBaptism: ''
         });
-        await logAction('Nova Celula', `Criou nova celula: ${cellData.name}`);
+      } else if (type === 'delete' && id) {
+        if (entity === 'cell') {
+          const cell = cells.find(c => c.id === id);
+          await deleteDoc(doc(db, 'cells', id));
+          await logAction('Excluir Celula', `Excluiu celula: ${cell?.name}`);
+          alert('Celula excluida com sucesso!');
+        } else {
+          await deleteDoc(doc(db, 'meetings', id));
+          await logAction('Excluir Reuniao', `Excluiu reuniao ID: ${id}`);
+          alert('Reuniao excluida com sucesso!');
+        }
       }
-      setIsModalOpen(false);
-      setEditingCell(null);
-      setFormData({ name: '', leader: '', leaderId: '', memberCount: 0, conversions: 0, members: '', acceptedJesus: '', wantBaptism: '' });
     } catch (err: any) {
-      console.error('Erro ao salvar celula:', err);
-      alert(`Erro ao salvar celula: ${err.message || 'Verifique suas permissoes.'}`);
+      console.error('Erro ao realizar operacao:', err);
+      alert(`Erro ao realizar operacao: ${err.message || 'Verifique suas permissoes.'}`);
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [deleteMeetingId, setDeleteMeetingId] = useState<string | null>(null);
-
-  const handleDelete = async (id: string) => {
-    setDeleteId(id);
-  };
-
-  const handleDeleteMeeting = async (id: string) => {
-    setDeleteMeetingId(id);
-  };
-
-  const confirmDelete = async () => {
-    if (deleteId) {
-      try {
-        const cell = cells.find(c => c.id === deleteId);
-        await deleteDoc(doc(db, 'cells', deleteId));
-        await logAction('Excluir Celula', `Excluiu celula: ${cell?.name}`);
-        alert('Celula excluida com sucesso!');
-      } catch (err) {
-        console.error('Erro ao excluir celula:', err);
-        alert(`Erro ao excluir celula: ${err instanceof Error ? err.message : 'Erro desconhecido'}`);
-      } finally {
-        setDeleteId(null);
-      }
-    } else if (deleteMeetingId) {
-      try {
-        await deleteDoc(doc(db, 'meetings', deleteMeetingId));
-        await logAction('Excluir Reuniao', `Excluiu reuniao ID: ${deleteMeetingId}`);
-        alert('Reuniao excluida com sucesso!');
-      } catch (err) {
-        console.error('Erro ao excluir reuniao:', err);
-        alert(`Erro ao excluir reuniao: ${err instanceof Error ? err.message : 'Erro desconhecido'}`);
-      } finally {
-        setDeleteMeetingId(null);
-      }
+      setPendingAction(null);
     }
   };
 
@@ -343,7 +322,7 @@ export default function Cells() {
                       <Edit2 size={18} />
                     </button>
                     <button
-                      onClick={() => handleDelete(cell.id)}
+                      onClick={() => setPendingAction({ type: 'delete', entity: 'cell', id: cell.id })}
                       className="rounded-lg p-2 text-zinc-400 hover:bg-rose-50 hover:text-rose-600"
                     >
                       <Trash2 size={18} />
@@ -418,7 +397,7 @@ export default function Cells() {
                         >
                           <Edit2 size={16} />
                         </button>
-                        <button onClick={() => handleDeleteMeeting(meeting.id)} className="rounded-lg p-2 text-zinc-400 hover:bg-rose-50 hover:text-rose-600">
+                        <button onClick={() => setPendingAction({ type: 'delete', entity: 'meeting', id: meeting.id })} className="rounded-lg p-2 text-zinc-400 hover:bg-rose-50 hover:text-rose-600">
                           <Trash2 size={16} />
                         </button>
                       </div>
@@ -684,41 +663,52 @@ export default function Cells() {
         </div>,
         document.body
       )}
-      {(deleteId || deleteMeetingId) && createPortal(
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => { setDeleteId(null); setDeleteMeetingId(null); }}
-            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-          />
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            className="relative w-full max-w-sm rounded-2xl bg-white p-8 shadow-2xl text-center"
-          >
-            <h2 className="text-xl font-bold text-zinc-900 mb-4">Excluir {deleteId ? 'Celula' : 'Reuniao'}?</h2>
-            <p className="text-zinc-500 mb-8">Esta acao nao pode ser desfeita.</p>
-            <div className="flex gap-4">
-              <button
-                onClick={() => { setDeleteId(null); setDeleteMeetingId(null); }}
-                className="flex-1 rounded-lg bg-zinc-100 py-2.5 font-semibold text-zinc-700 hover:bg-zinc-200"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={confirmDelete}
-                className="flex-1 rounded-lg bg-rose-600 py-2.5 font-semibold text-white hover:bg-rose-700"
-              >
-                Excluir
-              </button>
-            </div>
-          </motion.div>
-        </div>,
-        document.body
-      )}
+      {/* Modal de Confirmação */}
+      <AnimatePresence>
+        {pendingAction && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setPendingAction(null)}
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="relative w-full max-w-sm rounded-2xl bg-white p-8 shadow-2xl text-center"
+            >
+              <h2 className="text-xl font-bold text-zinc-900 mb-4">
+                Confirmar {pendingAction.type === 'create' ? 'criação' : pendingAction.type === 'update' ? 'alteração' : 'exclusão'}?
+              </h2>
+              <p className="text-zinc-500 mb-8">
+                Tem certeza que deseja {pendingAction.type === 'create' ? 'criar' : pendingAction.type === 'update' ? 'alterar' : 'excluir'} este {pendingAction.entity === 'cell' ? 'célula' : 'reunião'}?
+              </p>
+              <div className="flex gap-4">
+                <button
+                  onClick={() => setPendingAction(null)}
+                  className="flex-1 rounded-lg bg-zinc-100 py-2.5 font-semibold text-zinc-700 hover:bg-zinc-200"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={executeAction}
+                  disabled={submitting}
+                  className={cn(
+                    "flex-1 rounded-lg py-2.5 font-semibold text-white",
+                    pendingAction.type === 'delete' ? "bg-rose-600 hover:bg-rose-700" : "bg-zinc-900 hover:bg-zinc-800",
+                    submitting && "opacity-50"
+                  )}
+                >
+                  {submitting ? 'Salvando...' : 'Confirmar'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </>
   );
 }

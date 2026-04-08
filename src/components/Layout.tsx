@@ -1,7 +1,4 @@
-import { useEffect, useState } from 'react';
-import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { signOut } from 'firebase/auth';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, collection, query, onSnapshot, where, orderBy } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { 
   LayoutDashboard, 
@@ -17,6 +14,9 @@ import {
   Image as ImageIcon
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useEffect, useState } from 'react';
+import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import { signOut } from 'firebase/auth';
 
 interface LayoutProps {
   role: string | null;
@@ -24,11 +24,32 @@ interface LayoutProps {
 }
 
 export default function Layout({ role, userName }: LayoutProps) {
-  console.log('Layout: userName recebido:', userName);
   const navigate = useNavigate();
   const [churchSettings, setChurchSettings] = useState<{ name: string; logoUrl?: string } | null>(null);
-
   const [logoError, setLogoError] = useState(false);
+  const [privateMessageAlert, setPrivateMessageAlert] = useState<{senderName: string, senderUid: string} | null>(null);
+
+  useEffect(() => {
+    if (!auth.currentUser) return;
+    const q = query(
+      collection(db, 'messages'),
+      where('recipientUid', '==', auth.currentUser.uid),
+      orderBy('createdAt', 'desc')
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === 'added') {
+          const data = change.doc.data();
+          // Verifica se a mensagem é recente (menos de 5 segundos) para evitar alertas ao carregar a página
+          const createdAt = data.createdAt?.toDate();
+          if (createdAt && (new Date().getTime() - createdAt.getTime() < 5000) && window.location.pathname !== '/chat') {
+            setPrivateMessageAlert({senderName: data.senderName, senderUid: data.senderUid});
+          }
+        }
+      });
+    });
+    return () => unsubscribe();
+  }, [auth.currentUser]);
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -118,6 +139,13 @@ export default function Layout({ role, userName }: LayoutProps) {
 
       {/* Main Content */}
       <main className="flex-1 overflow-auto p-4 pb-24 lg:ml-64 lg:p-8 lg:pb-8 scrollbar-hide">
+        {privateMessageAlert && (
+          <div className="fixed top-20 right-4 bg-blue-600 text-white p-4 rounded-lg shadow-lg z-50 flex items-center gap-4">
+            <span>Nova mensagem privada de {privateMessageAlert.senderName}</span>
+            <button onClick={() => { navigate('/chat'); setPrivateMessageAlert(null); }} className="bg-white text-blue-600 px-2 py-1 rounded text-sm font-bold">Ver</button>
+            <button onClick={() => setPrivateMessageAlert(null)} className="text-white font-bold">X</button>
+          </div>
+        )}
         <div className="mx-auto max-w-6xl">
           <Outlet />
         </div>

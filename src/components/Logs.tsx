@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { collection, query, orderBy, onSnapshot, where, getDocs } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, auth } from '../firebase';
 import { Clock } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -20,6 +20,7 @@ export default function Logs() {
   const [searchDate, setSearchDate] = useState('');
 
   useEffect(() => {
+    if (!auth.currentUser) return;
     const q = query(collection(db, 'logs'), orderBy('timestamp', 'desc'));
     const unsubscribe = onSnapshot(q, async (snapshot) => {
       const logEntries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LogEntry));

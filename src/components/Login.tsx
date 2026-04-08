@@ -6,7 +6,7 @@ import {
   GoogleAuthProvider,
   signOut
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp, addDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, serverTimestamp, addDoc, collection, query, where, getDocs, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { LogIn, User as UserIcon, Lock, Globe, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import { motion } from 'motion/react';
@@ -48,33 +48,27 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [churchSettings, setChurchSettings] = useState<{ name: string; logoUrl?: string } | null>(null);
+  const [churchSettings, setChurchSettings] = useState<{ name: string; logoUrl?: string; pastorName?: string } | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [logoError, setLogoError] = useState(false);
   const [imageLoading, setImageLoading] = useState(true);
 
   useEffect(() => {
-    const fetchSettings = async () => {
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Timeout fetching settings')), 5000)
-      );
-
-      try {
-        const fetchPromise = getDoc(doc(db, 'settings', 'church'));
-        const sDoc = await Promise.race([fetchPromise, timeoutPromise]) as any;
-        
-        if (sDoc.exists()) {
-          setChurchSettings(sDoc.data() as any);
-        }
-      } catch (err: any) {
-        const errorMsg = handleFirestoreError(err, OperationType.GET, 'settings/church');
-        setSettingsError(errorMsg);
-      } finally {
+    const unsubscribe = onSnapshot(doc(db, 'settings', 'church'), (sDoc) => {
+      if (sDoc.exists()) {
+        setChurchSettings(sDoc.data() as any);
+        setSettingsLoading(false);
+      } else {
         setSettingsLoading(false);
       }
-    };
-    fetchSettings();
+    }, (err: any) => {
+      const errorMsg = handleFirestoreError(err, OperationType.GET, 'settings/church');
+      setSettingsError(errorMsg);
+      setSettingsLoading(false);
+    });
+    
+    return () => unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -365,7 +359,7 @@ export default function Login() {
             Sistema de Gestao Financeira
           </p>
           <p className="mt-2 text-[10px] text-zinc-400 uppercase tracking-widest font-semibold">
-            Ver. 1.5.5
+            Ver. 2.0.0
           </p>
         </div>
       </motion.div>

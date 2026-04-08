@@ -53,20 +53,6 @@ export default function Chat() {
       const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Message));
       console.log('Chat: Mensagens recebidas:', msgs);
       
-      // Notificação para novas mensagens privadas
-      if (snapshot.docChanges().some(change => change.type === 'added')) {
-        const lastMsg = msgs[msgs.length - 1];
-        if (lastMsg.senderUid !== auth.currentUser?.uid && lastMsg.recipientUid === auth.currentUser?.uid) {
-          // Exibe alerta visual no chat
-          setPrivateMessageAlert({senderName: lastMsg.senderName, senderUid: lastMsg.senderUid});
-          
-          // Notificação do navegador
-          if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
-            new Notification('Nova mensagem privada', { body: `${lastMsg.senderName}: ${lastMsg.text || 'Arquivo enviado'}` });
-          }
-        }
-      }
-      
       setMessages(msgs);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'messages');
@@ -140,7 +126,6 @@ export default function Chat() {
   };
 
   const [fileUploadError, setFileUploadError] = useState<string | null>(null);
-  const [privateMessageAlert, setPrivateMessageAlert] = useState<{senderName: string, senderUid: string} | null>(null);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -185,13 +170,6 @@ export default function Chat() {
         <button onClick={handleClearChat} className="mt-2 text-xs text-red-500 hover:underline">Apagar mensagens enviadas</button>
       </div>
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {privateMessageAlert && (
-          <div className="fixed top-20 right-4 bg-blue-600 text-white p-4 rounded-lg shadow-lg z-50 flex items-center gap-4">
-            <span>Nova mensagem privada de {privateMessageAlert.senderName}</span>
-            <button onClick={() => { setRecipientUid(privateMessageAlert.senderUid); setPrivateMessageAlert(null); }} className="bg-white text-blue-600 px-2 py-1 rounded text-sm font-bold">Ver</button>
-            <button onClick={() => setPrivateMessageAlert(null)} className="text-white font-bold">X</button>
-          </div>
-        )}
         {filteredMessages.map(message => (
           <div key={message.id} className={`flex flex-col ${message.senderUid === auth.currentUser?.uid ? 'items-end' : 'items-start'}`}>
             <span className="text-xs text-zinc-500">{message.senderName} {(!message.recipientUid || message.recipientUid === 'public') ? '(Público)' : '(Privado)'}</span>

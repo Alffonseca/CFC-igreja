@@ -15,7 +15,7 @@ interface UserProfile {
   uid?: string;
   name: string;
   email: string;
-  role: 'admin' | 'user' | 'cell' | 'pastor' | 'secretaria' | 'membro';
+  role: 'admin' | 'cell' | 'pastor' | 'secretaria' | 'membro';
   createdAt: any;
 }
 
@@ -30,12 +30,13 @@ export default function Users() {
   const [currentUserProfile, setCurrentUserProfile] = useState<UserProfile | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [pendingAction, setPendingAction] = useState<{ type: 'create' | 'update', data: any } | null>(null);
 
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     password: '',
-    role: 'user' as 'admin' | 'user' | 'cell' | 'pastor' | 'secretaria' | 'membro'
+    role: 'membro' as 'admin' | 'cell' | 'pastor' | 'secretaria' | 'membro'
   });
 
   useEffect(() => {
@@ -52,12 +53,17 @@ export default function Users() {
           status: isOnline ? 'online' : 'offline' 
         } as UserProfile & { status: string };
       });
+      
+      console.log('Usuários carregados do Firestore:', data);
+      
       setUsers(data);
       
       const myProfile = data.find(u => u.uid === auth.currentUser?.uid || u.id === auth.currentUser?.uid);
       setCurrentUserProfile(myProfile || null);
       
       setLoading(false);
+    }, (error) => {
+      console.error('Erro no snapshot listener em Users.tsx:', error);
     });
 
     return () => unsubscribe();
@@ -65,30 +71,66 @@ export default function Users() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setPendingAction({ type: editingUser ? 'update' : 'create', data: formData });
+    setIsModalOpen(false);
+  };
+
+  const executeAction = async () => {
+    console.log('Botão Confirmar clicado!');
+    if (!pendingAction) {
+      console.log('Nenhuma ação pendente encontrada.');
+      return;
+    }
     setSubmitting(true);
+    const { type, data } = pendingAction;
+    console.log('Executando ação:', type, 'para:', data);
     try {
       // Generate email, and if it's not the main admin email, use the provided email/username
-      const baseEmail = formData.email.includes('@') && formData.email !== 'emailparasiteslixo@gmail.com'
-        ? formData.email.split('@')[0]
-        : formData.email.includes('@')
-          ? formData.email.split('@')[0]
-          : formData.email;
+      const baseEmail = data.email.includes('@') && data.email !== 'emailparasiteslixo@gmail.com'
+        ? data.email.split('@')[0]
+        : data.email.includes('@')
+          ? data.email.split('@')[0]
+          : data.email;
       
-      const emailToUse = formData.email === 'emailparasiteslixo@gmail.com' 
-        ? formData.email
+      const emailToUse = data.email === 'emailparasiteslixo@gmail.com' 
+        ? data.email
         : `${baseEmail}${INTERNAL_DOMAIN}`;
 
       console.log('Tentando salvar usuário com e-mail/login:', emailToUse);
-      console.log('FormData:', formData);
+      console.log('FormData:', data);
+      console.log('Type:', type);
+      console.log('EditingUser:', editingUser);
 
-      if (editingUser) {
-        // Update Firestore document
-        await updateDoc(doc(db, 'users', editingUser.id), {
-          name: formData.name,
+      // Check if user is trying to set admin role without being admin
+      if (data.role === 'admin' && currentUserProfile?.role !== 'admin') {
+        alert('Apenas administradores podem atribuir o nível de Administrador.');
+        setSubmitting(false);
+        setPendingAction(null);
+        return;
+      }
+
+      if (type === 'update' && editingUser) {
+        console.log('Atualizando documento:', editingUser.id);
+        console.log('Dados para atualização:', {
+          name: data.name,
           email: emailToUse,
-          role: formData.role,
+          role: data.role,
         });
-        await logAction('Editar Usuario', `Editou usuario: ${formData.name} (${emailToUse})`);
+        try {
+          // Update Firestore document
+          await updateDoc(doc(db, 'users', editingUser.id), {
+            name: data.name,
+            email: emailToUse,
+            role: data.role,
+          });
+          console.log('Documento atualizado com sucesso no Firestore.');
+          await logAction('Editar Usuario', `Editou usuario: ${data.name} (${emailToUse})`);
+          console.log('Log de ação registrado.');
+        } catch (firestoreErr) {
+          console.error('Erro ao atualizar Firestore:', firestoreErr);
+          throw firestoreErr;
+        }
+        console.log('Fim do bloco de atualização.');
 
         // If editing current user and email/username changed, update it in Auth
         if (editingUser.uid === auth.currentUser?.uid && emailToUse !== auth.currentUser?.email) {
@@ -105,9 +147,9 @@ export default function Users() {
         }
 
         // If editing current user and password provided, update it
-        if (editingUser.uid === auth.currentUser?.uid && formData.password) {
+        if (editingUser.uid === auth.currentUser?.uid && data.password) {
           try {
-            await updatePassword(auth.currentUser, formData.password);
+            await updatePassword(auth.currentUser, data.password);
             alert('Senha atualizada com sucesso!');
           } catch (passErr: any) {
             console.error('Erro ao atualizar senha:', passErr);
@@ -119,10 +161,10 @@ export default function Users() {
           }
         }
       } else {
-        // Use a secondary app instance to create the user without logging out the current admin
-        if (!firebaseConfig || !firebaseConfig.apiKey) {
-          throw new Error('Configuração do Firebase não encontrada ou inválida.');
-        }
+          // Use a secondary app instance to create the user without logging out the current admin
+          if (!firebaseConfig || !firebaseConfig.apiKey) {
+            throw new Error('Configuração do Firebase não encontrada ou inválida.');
+          }
 
         const appName = `SecondaryApp_${Date.now()}`;
         const secondaryApp = initializeApp(firebaseConfig, appName);
@@ -133,7 +175,7 @@ export default function Users() {
           const userCredential = await createUserWithEmailAndPassword(
             secondaryAuth, 
             emailToUse, 
-            formData.password
+            data.password
           );
           
           const newUser = userCredential.user;
@@ -141,23 +183,22 @@ export default function Users() {
           
           await setDoc(doc(db, 'users', newUser.uid), {
             uid: newUser.uid,
-            name: formData.name,
+            name: data.name,
             email: emailToUse,
-            role: formData.role,
+            role: data.role,
             createdAt: serverTimestamp()
           });
-          await logAction('Novo Usuario', `Criou novo usuario: ${formData.name} (${emailToUse})`);
+          await logAction('Novo Usuario', `Criou novo usuario: ${data.name} (${emailToUse})`);
 
           // Clean up secondary app
           await secondarySignOut(secondaryAuth);
           await deleteApp(secondaryApp);
+          
+          alert('Usuário criado com sucesso!');
         } catch (authErr: any) {
           if (authErr.code === 'auth/email-already-in-use') {
-            console.warn('E-mail já em uso na Auth, tentando prosseguir apenas com Firestore...');
-            // Se o erro for apenas que o e-mail já existe na Auth, 
-            // tentamos apenas criar o documento no Firestore.
-            // Nota: Isso pode falhar se não tivermos o UID do usuário existente.
-            alert('Este nome de usuário já existe na autenticação. Tente um nome diferente.');
+            console.warn('E-mail já em uso na Auth:', emailToUse);
+            alert(`O e-mail "${emailToUse}" já está em uso na autenticação. Verifique se este usuário já existe ou tente um nome diferente.`);
           } else {
             console.error('Erro detalhado no bloco try/catch do createUserWithEmailAndPassword:', authErr);
           }
@@ -171,7 +212,7 @@ export default function Users() {
       }
       setIsModalOpen(false);
       setEditingUser(null);
-      setFormData({ name: '', email: '', password: '', role: 'user' });
+      setFormData({ name: '', email: '', password: '', role: 'membro' });
     } catch (err: any) {
       console.error('Erro detalhado ao salvar usuário:', err);
       let message = `Erro ao salvar usuário (${err.code || 'Erro desconhecido'}): ${err.message || ''}`;
@@ -199,6 +240,7 @@ export default function Users() {
       alert(message);
     } finally {
       setSubmitting(false);
+      setPendingAction(null);
     }
   };
 
@@ -218,8 +260,10 @@ export default function Users() {
 
   const confirmDelete = async () => {
     if (!deleteUser) return;
+    console.log('Confirmando exclusão do usuário:', deleteUser.id);
     try {
       await deleteDoc(doc(db, 'users', deleteUser.id));
+      console.log('Exclusão bem-sucedida.');
       await logAction('Excluir Usuario', `Excluiu usuario: ${deleteUser.name} (${deleteUser.email})`);
       alert('Usuario excluido com sucesso!');
     } catch (err: any) {
@@ -241,7 +285,7 @@ export default function Users() {
           <button
             onClick={() => {
               setEditingUser(null);
-              setFormData({ name: '', email: '', password: '', role: 'user' });
+              setFormData({ name: '', email: '', password: '', role: 'membro' });
               setIsModalOpen(true);
             }}
             className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2.5 font-semibold text-white transition-all hover:bg-zinc-800 active:scale-95"
@@ -265,7 +309,7 @@ export default function Users() {
           let matchesRole = false;
           if (currentUserProfile?.role === 'admin') matchesRole = true;
           else if (currentUserProfile?.role === 'pastor') matchesRole = user.role !== 'admin';
-          else if (currentUserProfile?.role === 'secretaria') matchesRole = user.role !== 'admin' && user.role !== 'pastor';
+          else if (currentUserProfile?.role === 'secretaria') matchesRole = user.role !== 'admin';
           
           if (!matchesRole) return false;
 
@@ -273,8 +317,7 @@ export default function Users() {
           const roleDisplayName = user.role === 'admin' ? 'Administrador' : 
                                   user.role === 'pastor' ? 'Pastor' :
                                   user.role === 'secretaria' ? 'Secretaria' :
-                                  user.role === 'cell' ? 'Celula' : 
-                                  user.role === 'membro' ? 'Membro' : 'Usuario';
+                                  user.role === 'cell' ? 'Celula' : 'Membro';
 
           const matchesSearch = user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                                 roleDisplayName.toLowerCase().includes(searchTerm.toLowerCase());
@@ -311,14 +354,12 @@ export default function Users() {
               user.role === 'pastor' ? "bg-purple-100 text-purple-800" :
               user.role === 'secretaria' ? "bg-blue-100 text-blue-800" :
               user.role === 'cell' ? "bg-zinc-200 text-zinc-800" : 
-              user.role === 'membro' ? "bg-emerald-100 text-emerald-800" :
-              "bg-zinc-100 text-zinc-600"
+              "bg-emerald-100 text-emerald-800"
             )}>
               {user.role === 'admin' ? 'Administrador' : 
                user.role === 'pastor' ? 'Pastor' :
                user.role === 'secretaria' ? 'Secretaria' :
-               user.role === 'cell' ? 'Celula' : 
-               user.role === 'membro' ? 'Membro' : 'Usuario'}
+               user.role === 'cell' ? 'Celula' : 'Membro'}
             </span>
 
             <div className="mt-6 flex w-full gap-2 border-t border-zinc-100 pt-4">
@@ -344,6 +385,41 @@ export default function Users() {
       </div>
 
       <AnimatePresence>
+        {pendingAction && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setPendingAction(null)}
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="relative w-full max-w-sm rounded-2xl bg-white p-8 shadow-2xl text-center"
+            >
+              <h2 className="text-xl font-bold text-zinc-900 mb-4">Confirmar {pendingAction.type === 'create' ? 'criação' : 'alteração'}?</h2>
+              <p className="text-zinc-500 mb-8">Tem certeza que deseja {pendingAction.type === 'create' ? 'criar' : 'alterar'} este usuário?</p>
+              <div className="flex gap-4">
+                <button
+                  onClick={() => setPendingAction(null)}
+                  className="flex-1 rounded-lg bg-zinc-100 py-2.5 font-semibold text-zinc-700 hover:bg-zinc-200"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={executeAction}
+                  disabled={submitting}
+                  className="flex-1 rounded-lg bg-zinc-900 py-2.5 font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
+                >
+                  {submitting ? 'Salvando...' : 'Confirmar'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
         {isModalOpen && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
             <motion.div
@@ -437,12 +513,11 @@ export default function Users() {
                     onChange={(e) => setFormData({ ...formData, role: e.target.value as any })}
                     className="w-full rounded-lg border border-zinc-200 bg-zinc-50 p-2.5 outline-none focus:ring-2 focus:ring-zinc-900/10"
                   >
-                    <option value="user">Usuario Comum</option>
-                    <option value="admin">Administrador</option>
-                    <option value="pastor">Pastor</option>
-                    <option value="secretaria">Secretaria</option>
-                    <option value="cell">Celula</option>
                     <option value="membro">Membro</option>
+                    <option value="cell">Celula</option>
+                    <option value="secretaria">Secretaria</option>
+                    <option value="pastor">Pastor</option>
+                    {currentUserProfile?.role === 'admin' && <option value="admin">Administrador</option>}
                   </select>
                 </div>
 

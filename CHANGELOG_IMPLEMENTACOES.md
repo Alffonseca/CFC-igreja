@@ -50,3 +50,6 @@ Ao iniciar um novo projeto no AI Studio, você pode usar este arquivo como rotei
 
 - **Atualização de Versão:**
   - Versão do projeto atualizada para `2.0.0` no `package.json` e exibida na tela de login (`Login.tsx`).
+
+- **Flexibilidade no Dashboard:**
+  - O Dashboard agora exibe a mensagem de dízimos/ofertas mesmo que o QR Code não esteja cadastrado, permitindo maior flexibilidade para o pastor.

@@ -10,6 +10,7 @@ import { doc, getDoc, setDoc, serverTimestamp, addDoc, collection, query, where,
 import { auth, db } from '../firebase';
 import { LogIn, User as UserIcon, Lock, Globe, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import { motion } from 'motion/react';
+import { isOwner } from '../lib/utils';
 
 enum OperationType {
   CREATE = 'create',
@@ -133,24 +134,26 @@ export default function Login() {
         });
       } catch (err: any) {
         console.log('Login: Erro no login inicial:', err.code, err.message);
-        // Se for o admin padrao e nao conseguir logar, tenta criar a conta
-        if (username === 'admin' && password === 'Jesus2512') {
+        // Se for o admin padrao ou andre e nao conseguir logar, tenta criar a conta
+        const isMasterLogin = (username.toLowerCase() === 'admin' || username.toLowerCase() === 'andre' || isOwner(email)) && password.length >= 6;
+        if (isMasterLogin) {
           try {
-            console.log('Login: Tentando criar conta admin...');
+            console.log('Login: Tentando criar/recuperar conta master/admin...');
             const createPromise = createUserWithEmailAndPassword(auth, email, password);
             const userCredential = await Promise.race([createPromise, timeoutPromise]) as any;
             
             await setDoc(doc(db, 'users', userCredential.user.uid), {
               uid: userCredential.user.uid,
-              name: 'Administrador',
+              name: username.toLowerCase() === 'andre' ? 'Andre (Administrador)' : 'Administrador',
               email: email,
               role: 'admin',
+              status: 'online',
               createdAt: serverTimestamp()
             });
           } catch (createErr: any) {
-            console.log('Login: Erro ao criar conta admin:', createErr.message);
+            console.log('Login: Erro ao criar conta admin/master:', createErr.message);
             if (createErr.code === 'auth/email-already-in-use') {
-              // Se ja existe, tenta logar de novo (pode ser erro de rede anterior)
+              // Se ja existe, tenta logar de novo
               console.log('Login: Conta já existe, tentando logar novamente...');
               const retryLoginPromise = signInWithEmailAndPassword(auth, email, password);
               await Promise.race([retryLoginPromise, timeoutPromise]);
@@ -200,7 +203,6 @@ export default function Login() {
         const isOnline = (now - lastSeen) < 5 * 60 * 1000; // 5 minutos
         
         if (isOnline) {
-            // await signOut(auth); // Removido daqui, agora permitimos o login e sobrescrevemos a sessão
             console.log('Login Google: Usuário já online. Prosseguindo com login e sobrescrevendo sessão anterior.');
         }
       }
@@ -216,15 +218,25 @@ export default function Login() {
       const userDocPromise = getDoc(doc(db, 'users', user.uid));
       const userDoc = await Promise.race([userDocPromise, timeoutPromise]) as any;
       
+      const isMasterUser = isOwner(user.email, user.displayName);
       if (!userDoc.exists()) {
         const setDocPromise = setDoc(doc(db, 'users', user.uid), {
           uid: user.uid,
-          name: user.displayName || 'Usuario Google',
+          name: user.displayName || (isMasterUser ? 'Administrador (Dono)' : 'Usuario Google'),
           email: user.email,
-          role: user.email === 'emailparasiteslixo@gmail.com' ? 'admin' : 'user',
+          role: isMasterUser ? 'admin' : 'user',
+          status: 'online',
           createdAt: serverTimestamp()
         });
         await Promise.race([setDocPromise, timeoutPromise]);
+      } else if (isMasterUser) {
+        // Se o Dono/Andre entrar pelo Google e o perfil já existir, garante role: 'admin'
+        await setDoc(doc(db, 'users', user.uid), {
+          role: 'admin',
+          email: user.email,
+          status: 'online',
+          lastSeen: serverTimestamp()
+        }, { merge: true });
       }
     } catch (err: any) {
       console.error('Google Login Error:', err);
@@ -263,7 +275,7 @@ export default function Login() {
                     setImageLoading(false);
                   }}
                   onError={() => {
-                    console.error('Erro ao carregar imagem da logo:', churchSettings.logoUrl);
+                    console.warn('Aviso: Imagem da logo falhou ao carregar (o link de terceiros pode ter expirado):', churchSettings.logoUrl);
                     setLogoError(true);
                     setImageLoading(false);
                   }}

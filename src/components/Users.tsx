@@ -5,9 +5,9 @@ import { initializeApp, getApps, deleteApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut as secondarySignOut, sendEmailVerification, updatePassword, updateEmail, onAuthStateChanged } from 'firebase/auth';
 import { db, auth } from '../firebase';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { Plus, Edit2, Trash2, UserPlus, X, Shield, User as UserIcon, Lock, Eye, EyeOff } from 'lucide-react';
+import { Plus, Edit2, Trash2, UserPlus, X, Shield, User as UserIcon, Lock, Eye, EyeOff, Crown } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn } from '../lib/utils';
+import { cn, isOwner, OWNER_EMAIL } from '../lib/utils';
 import { logAction } from '../lib/logger';
 
 interface UserProfile {
@@ -43,13 +43,22 @@ export default function Users() {
     const q = query(collection(db, 'users'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const now = new Date().getTime();
-      const data = snapshot.docs.map(doc => {
-        const userData = doc.data();
+      const data = snapshot.docs.map(d => {
+        const userData = d.data();
         const lastSeen = userData.lastSeen?.toDate().getTime() || 0;
         const isOnline = (now - lastSeen) < 5 * 60 * 1000; // 5 minutos
+        const userEmail = userData.email || '';
+        const isUserOwner = isOwner(userEmail, userData.name);
+        
+        // Se for o dono/Andre e estiver com outro cargo no banco, auto-corrige
+        if (isUserOwner && userData.role !== 'admin') {
+          updateDoc(doc(db, 'users', d.id), { role: 'admin' }).catch(console.error);
+        }
+
         return { 
-          id: doc.id, 
-          ...userData, 
+          id: d.id, 
+          ...userData,
+          role: isUserOwner ? 'admin' : userData.role,
           status: isOnline ? 'online' : 'offline' 
         } as UserProfile & { status: string };
       });
@@ -58,7 +67,19 @@ export default function Users() {
       
       setUsers(data);
       
-      const myProfile = data.find(u => u.uid === auth.currentUser?.uid || u.id === auth.currentUser?.uid);
+      const isCurrentOwner = isOwner(auth.currentUser?.email, auth.currentUser?.displayName);
+      let myProfile = data.find(u => u.uid === auth.currentUser?.uid || u.id === auth.currentUser?.uid);
+      if (isCurrentOwner) {
+        myProfile = myProfile ? { ...myProfile, role: 'admin' } : {
+          id: auth.currentUser?.uid || 'owner',
+          uid: auth.currentUser?.uid,
+          name: auth.currentUser?.displayName || 'Administrador (Dono)',
+          email: auth.currentUser?.email || OWNER_EMAIL,
+          role: 'admin',
+          status: 'online',
+          createdAt: null
+        };
+      }
       setCurrentUserProfile(myProfile || null);
       
       setLoading(false);
@@ -85,55 +106,51 @@ export default function Users() {
     const { type, data } = pendingAction;
     console.log('Executando ação:', type, 'para:', data);
     try {
+      const isTargetOwner = isOwner(data.email, data.name) || (editingUser && isOwner(editingUser.email, editingUser.name));
+      
       // Generate email, and if it's not the main admin email, use the provided email/username
-      const baseEmail = data.email.includes('@') && data.email !== 'emailparasiteslixo@gmail.com'
+      const baseEmail = data.email.includes('@') && !isOwner(data.email, data.name)
         ? data.email.split('@')[0]
         : data.email.includes('@')
           ? data.email.split('@')[0]
           : data.email;
       
-      const emailToUse = data.email === 'emailparasiteslixo@gmail.com' 
-        ? data.email
+      const emailToUse = isTargetOwner 
+        ? (editingUser?.email || data.email)
         : `${baseEmail}${INTERNAL_DOMAIN}`;
 
       console.log('Tentando salvar usuário com e-mail/login:', emailToUse);
-      console.log('FormData:', data);
-      console.log('Type:', type);
-      console.log('EditingUser:', editingUser);
+
+      const isCurrentAdmin = currentUserProfile?.role === 'admin' || isOwner(auth.currentUser?.email, auth.currentUser?.displayName);
 
       // Check if user is trying to set admin role without being admin
-      if (data.role === 'admin' && currentUserProfile?.role !== 'admin') {
+      if (data.role === 'admin' && !isCurrentAdmin) {
         alert('Apenas administradores podem atribuir o nível de Administrador.');
         setSubmitting(false);
         setPendingAction(null);
         return;
       }
 
+      const roleToSave = isTargetOwner ? 'admin' : data.role;
+
       if (type === 'update' && editingUser) {
         console.log('Atualizando documento:', editingUser.id);
-        console.log('Dados para atualização:', {
-          name: data.name,
-          email: emailToUse,
-          role: data.role,
-        });
         try {
           // Update Firestore document
           await updateDoc(doc(db, 'users', editingUser.id), {
             name: data.name,
             email: emailToUse,
-            role: data.role,
+            role: roleToSave,
           });
           console.log('Documento atualizado com sucesso no Firestore.');
           await logAction('Editar Usuario', `Editou usuario: ${data.name} (${emailToUse})`);
-          console.log('Log de ação registrado.');
         } catch (firestoreErr) {
           console.error('Erro ao atualizar Firestore:', firestoreErr);
           throw firestoreErr;
         }
-        console.log('Fim do bloco de atualização.');
 
         // If editing current user and email/username changed, update it in Auth
-        if (editingUser.uid === auth.currentUser?.uid && emailToUse !== auth.currentUser?.email) {
+        if (editingUser.uid === auth.currentUser?.uid && emailToUse !== auth.currentUser?.email && !isTargetOwner) {
           try {
             await updateEmail(auth.currentUser, emailToUse);
           } catch (emailErr: any) {
@@ -161,10 +178,10 @@ export default function Users() {
           }
         }
       } else {
-          // Use a secondary app instance to create the user without logging out the current admin
-          if (!firebaseConfig || !firebaseConfig.apiKey) {
-            throw new Error('Configuração do Firebase não encontrada ou inválida.');
-          }
+        // Use a secondary app instance to create the user without logging out the current admin
+        if (!firebaseConfig || !firebaseConfig.apiKey) {
+          throw new Error('Configuração do Firebase não encontrada ou inválida.');
+        }
 
         const appName = `SecondaryApp_${Date.now()}`;
         const secondaryApp = initializeApp(firebaseConfig, appName);
@@ -185,7 +202,7 @@ export default function Users() {
             uid: newUser.uid,
             name: data.name,
             email: emailToUse,
-            role: data.role,
+            role: roleToSave,
             createdAt: serverTimestamp()
           });
           await logAction('Novo Usuario', `Criou novo usuario: ${data.name} (${emailToUse})`);
@@ -247,6 +264,10 @@ export default function Users() {
   const [deleteUser, setDeleteUser] = useState<UserProfile | null>(null);
 
   const handleDelete = async (user: UserProfile) => {
+    if (isOwner(user.email, user.name)) {
+      alert('Não é permitido excluir o perfil do Dono do sistema.');
+      return;
+    }
     if (user.role === 'admin') {
       alert('Não é possível excluir um administrador.');
       return;
@@ -273,6 +294,8 @@ export default function Users() {
       setDeleteUser(null);
     }
   };
+
+  const isCurrentAdmin = currentUserProfile?.role === 'admin' || isOwner(auth.currentUser?.email, auth.currentUser?.displayName);
 
   return (
     <div className="space-y-6">
@@ -305,16 +328,16 @@ export default function Users() {
 
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
         {users.filter(user => {
-          // Existing role-based filter
           let matchesRole = false;
-          if (currentUserProfile?.role === 'admin') matchesRole = true;
+          if (isCurrentAdmin) matchesRole = true;
           else if (currentUserProfile?.role === 'pastor') matchesRole = user.role !== 'admin';
           else if (currentUserProfile?.role === 'secretaria') matchesRole = user.role !== 'admin';
           
           if (!matchesRole) return false;
 
-          // New search filter
-          const roleDisplayName = user.role === 'admin' ? 'Administrador' : 
+          const isUserOwner = isOwner(user.email, user.name);
+          const roleDisplayName = isUserOwner ? 'Dono / Administrador' :
+                                  user.role === 'admin' ? 'Administrador' : 
                                   user.role === 'pastor' ? 'Pastor' :
                                   user.role === 'secretaria' ? 'Secretaria' :
                                   user.role === 'cell' ? 'Celula' : 'Membro';
@@ -323,65 +346,82 @@ export default function Users() {
                                 roleDisplayName.toLowerCase().includes(searchTerm.toLowerCase());
           
           return matchesSearch;
-        }).map((user) => (
-          <motion.div
-            key={user.id}
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="group relative flex flex-col items-center rounded-2xl bg-white p-6 text-center shadow-sm ring-1 ring-zinc-200"
-          >
-            <div className={cn(
-              "mb-4 flex h-16 w-16 items-center justify-center rounded-full",
-              user.role === 'admin' ? "bg-zinc-900 text-white" : "bg-zinc-100 text-zinc-400"
-            )}>
-              {user.role === 'admin' ? <Shield size={32} /> : <UserIcon size={32} />}
-            </div>
-            <h3 className="text-lg font-bold text-zinc-900 flex items-center gap-2">
-              {user.name}
+        }).map((user) => {
+          const isUserOwner = isOwner(user.email, user.name);
+          return (
+            <motion.div
+              key={user.id}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className={cn(
+                "group relative flex flex-col items-center rounded-2xl bg-white p-6 text-center shadow-sm ring-1",
+                isUserOwner ? "ring-amber-400/80 bg-gradient-to-b from-amber-50/20 to-white" : "ring-zinc-200"
+              )}
+            >
+              {isUserOwner && (
+                <div className="absolute top-3 right-3 flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800 ring-1 ring-amber-300">
+                  <Crown size={12} className="text-amber-600" />
+                  DONO / MASTER
+                </div>
+              )}
               <div className={cn(
-                "h-4 w-4 rounded-full border-2 border-white",
-                (user as any).status === 'online' ? "bg-emerald-500" : "bg-rose-500"
-              )} title={(user as any).status === 'online' ? 'Online' : 'Offline'} />
-            </h3>
-            <p className="text-sm text-zinc-500">
-              {user.email.endsWith(INTERNAL_DOMAIN) 
-                ? user.email.replace(INTERNAL_DOMAIN, '') 
-                : user.email}
-            </p>
-            <span className={cn(
-              "mt-3 inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider",
-              user.role === 'admin' ? "bg-zinc-900 text-white" : 
-              user.role === 'pastor' ? "bg-purple-100 text-purple-800" :
-              user.role === 'secretaria' ? "bg-blue-100 text-blue-800" :
-              user.role === 'cell' ? "bg-zinc-200 text-zinc-800" : 
-              "bg-emerald-100 text-emerald-800"
-            )}>
-              {user.role === 'admin' ? 'Administrador' : 
-               user.role === 'pastor' ? 'Pastor' :
-               user.role === 'secretaria' ? 'Secretaria' :
-               user.role === 'cell' ? 'Celula' : 'Membro'}
-            </span>
+                "mb-4 flex h-16 w-16 items-center justify-center rounded-full",
+                isUserOwner ? "bg-amber-500 text-white shadow-md shadow-amber-500/20" :
+                user.role === 'admin' ? "bg-zinc-900 text-white" : "bg-zinc-100 text-zinc-400"
+              )}>
+                {isUserOwner ? <Crown size={32} /> : user.role === 'admin' ? <Shield size={32} /> : <UserIcon size={32} />}
+              </div>
+              <h3 className="text-lg font-bold text-zinc-900 flex items-center gap-2">
+                {user.name}
+                <div className={cn(
+                  "h-4 w-4 rounded-full border-2 border-white",
+                  (user as any).status === 'online' ? "bg-emerald-500" : "bg-rose-500"
+                )} title={(user as any).status === 'online' ? 'Online' : 'Offline'} />
+              </h3>
+              <p className="text-sm text-zinc-500">
+                {user.email.endsWith(INTERNAL_DOMAIN) 
+                  ? user.email.replace(INTERNAL_DOMAIN, '') 
+                  : user.email}
+              </p>
+              <span className={cn(
+                "mt-3 inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider",
+                isUserOwner ? "bg-amber-100 text-amber-900 font-extrabold ring-1 ring-amber-300" :
+                user.role === 'admin' ? "bg-zinc-900 text-white" : 
+                user.role === 'pastor' ? "bg-purple-100 text-purple-800" :
+                user.role === 'secretaria' ? "bg-blue-100 text-blue-800" :
+                user.role === 'cell' ? "bg-zinc-200 text-zinc-800" : 
+                "bg-emerald-100 text-emerald-800"
+              )}>
+                {isUserOwner ? 'Dono / Administrador' :
+                 user.role === 'admin' ? 'Administrador' : 
+                 user.role === 'pastor' ? 'Pastor' :
+                 user.role === 'secretaria' ? 'Secretaria' :
+                 user.role === 'cell' ? 'Celula' : 'Membro'}
+              </span>
 
-            <div className="mt-6 flex w-full gap-2 border-t border-zinc-100 pt-4">
-              <button
-                onClick={() => {
-                  setEditingUser(user);
-                  setFormData({ name: user.name, email: user.email, password: '', role: user.role });
-                  setIsModalOpen(true);
-                }}
-                className="flex-1 rounded-lg bg-zinc-50 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100"
-              >
-                Editar
-              </button>
-              <button
-                onClick={() => handleDelete(user)}
-                className="flex-1 rounded-lg bg-rose-50 py-2 text-sm font-medium text-rose-600 hover:bg-rose-100"
-              >
-                Excluir
-              </button>
-            </div>
-          </motion.div>
-        ))}
+              <div className="mt-6 flex w-full gap-2 border-t border-zinc-100 pt-4">
+                <button
+                  onClick={() => {
+                    setEditingUser(user);
+                    setFormData({ name: user.name, email: user.email, password: '', role: user.role });
+                    setIsModalOpen(true);
+                  }}
+                  className="flex-1 rounded-lg bg-zinc-50 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100"
+                >
+                  Editar
+                </button>
+                {!isUserOwner && (
+                  <button
+                    onClick={() => handleDelete(user)}
+                    className="flex-1 rounded-lg bg-rose-50 py-2 text-sm font-medium text-rose-600 hover:bg-rose-100"
+                  >
+                    Excluir
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          );
+        })}
       </div>
 
       <AnimatePresence>
@@ -462,17 +502,20 @@ export default function Users() {
                   <input
                     type="text"
                     required
+                    disabled={Boolean(editingUser && isOwner(editingUser.email, editingUser.name))}
                     value={formData.email.endsWith(INTERNAL_DOMAIN) ? formData.email.replace(INTERNAL_DOMAIN, '') : formData.email}
                     onChange={(e) => {
-                      // Prevent entering @ if it's not the main admin email
                       const val = e.target.value;
-                      if (!val.includes('@') || val === 'emailparasiteslixo@gmail.com') {
+                      if (!val.includes('@') || isOwner(val)) {
                         setFormData({ ...formData, email: val });
                       } else {
                         setFormData({ ...formData, email: val.split('@')[0] });
                       }
                     }}
-                    className="w-full rounded-lg border border-zinc-200 bg-zinc-50 p-2.5 outline-none focus:ring-2 focus:ring-zinc-900/10"
+                    className={cn(
+                      "w-full rounded-lg border border-zinc-200 bg-zinc-50 p-2.5 outline-none focus:ring-2 focus:ring-zinc-900/10",
+                      editingUser && isOwner(editingUser.email, editingUser.name) ? "opacity-60 cursor-not-allowed" : ""
+                    )}
                     placeholder="Ex: joaosilva"
                   />
                   <p className="text-[10px] text-zinc-400 italic">Este nome sera usado para entrar no sistema.</p>
@@ -508,17 +551,23 @@ export default function Users() {
 
                 <div className="space-y-1">
                   <label className="text-xs font-bold uppercase tracking-wider text-zinc-500">Nivel de Acesso</label>
-                  <select
-                    value={formData.role}
-                    onChange={(e) => setFormData({ ...formData, role: e.target.value as any })}
-                    className="w-full rounded-lg border border-zinc-200 bg-zinc-50 p-2.5 outline-none focus:ring-2 focus:ring-zinc-900/10"
-                  >
-                    <option value="membro">Membro</option>
-                    <option value="cell">Celula</option>
-                    <option value="secretaria">Secretaria</option>
-                    <option value="pastor">Pastor</option>
-                    {currentUserProfile?.role === 'admin' && <option value="admin">Administrador</option>}
-                  </select>
+                  {editingUser && isOwner(editingUser.email, editingUser.name) ? (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-sm font-semibold text-amber-900">
+                      Administrador (Dono - Acesso Total)
+                    </div>
+                  ) : (
+                    <select
+                      value={formData.role}
+                      onChange={(e) => setFormData({ ...formData, role: e.target.value as any })}
+                      className="w-full rounded-lg border border-zinc-200 bg-zinc-50 p-2.5 outline-none focus:ring-2 focus:ring-zinc-900/10"
+                    >
+                      <option value="membro">Membro</option>
+                      <option value="cell">Celula</option>
+                      <option value="secretaria">Secretaria</option>
+                      <option value="pastor">Pastor</option>
+                      {isCurrentAdmin && <option value="admin">Administrador</option>}
+                    </select>
+                  )}
                 </div>
 
                 <button
@@ -572,3 +621,4 @@ export default function Users() {
     </div>
   );
 }
+

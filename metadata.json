@@ -1,5 +1,6 @@
 {
   "name": "CFC para Igrejas",
-  "description": "Aplicativo para gestão financeira de igrejas, com lançamentos de dízimos, ofertas, despesas e relatórios mensais. (Atualizado para corrigir erro de página não encontrada)",
-  "requestFramePermissions": []
+  "description": "Sistema de gestão financeira e eclesiástica para igrejas, com lançamentos de dízimos, ofertas, despesas, divisão automática de cultos (Terça-Sexta-Domingo) e relatórios oficiais Quadrangular (REFC e Entradas com impressão e PDF).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -77,10 +77,17 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isMasterAdminEmail() {
+      return request.auth.token.email == "emailparasiteslixo@gmail.com" ||
+             request.auth.token.email == "andre@gestao.igreja" ||
+             request.auth.token.email == "admin@gestao.igreja";
+    }
+
     function isAdmin() {
       return isAuthenticated() && 
-             (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin" ||
-              request.auth.token.email == "emailparasiteslixo@gmail.com");
+             (isMasterAdminEmail() ||
+              (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin"));
     }
 
     function isOwner(userId) {
@@ -192,7 +199,7 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isAdmin();
+      allow create: if isAuthenticated() && (isAdmin() || isOwner(userId));
       allow update: if isAuthenticated() && (isOwner(userId) || isAdmin());
       allow delete: if isAuthenticated() && isAdmin();
     }

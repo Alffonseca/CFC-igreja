@@ -24,8 +24,10 @@
         "amount": { "type": "number", "description": "Transaction amount" },
         "date": { "type": "string", "format": "date", "description": "Date of the transaction" },
         "description": { "type": "string", "description": "Description or member name" },
+        "destination": { "type": "string", "description": "Destination of funds" },
         "category": { "type": "string", "description": "Category for expenses" },
         "notes": { "type": "string", "description": "Additional notes" },
+        "refcMonth": { "type": "string", "description": "Associated REFC competence month YYYY-MM" },
         "createdBy": { "type": "string", "description": "UID of the user who created it" },
         "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" }
       },
@@ -108,6 +110,10 @@
     "/messages/{messageId}": {
       "schema": "messages",
       "description": "Chat messages."
+    },
+    "/refc_reports/{reportId}": {
+      "schema": "transactions",
+      "description": "REFC Monthly Report configurations and entries."
     }
   }
 }

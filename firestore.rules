@@ -87,7 +87,7 @@ service cloud.firestore {
       return isAuthenticated() && 
              (isMasterAdminEmail() ||
               (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin"));
+               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ["admin", "pastor", "secretaria"]));
     }
 
     function isOwner(userId) {
@@ -122,12 +122,15 @@ service cloud.firestore {
 
     function isValidTransaction(data) {
       return hasRequiredFields(['type', 'amount', 'date', 'description', 'createdBy', 'createdAt']) &&
-             hasOnlyAllowedFields(['type', 'amount', 'date', 'description', 'destination', 'category', 'notes', 'createdBy', 'createdAt']) &&
+             hasOnlyAllowedFields(['type', 'amount', 'date', 'description', 'destination', 'category', 'notes', 'createdBy', 'createdAt', 'refcMonth']) &&
              data.type in ['tithe', 'offering', 'expense'] &&
-             data.amount is number && data.amount > 0 &&
+             data.amount is number && data.amount >= 0 &&
              data.date is string &&
              data.description is string && data.description.size() > 0 && data.description.size() < 500 &&
              (!('destination' in data) || data.destination is string) &&
+             (!('category' in data) || data.category is string) &&
+             (!('notes' in data) || data.notes is string) &&
+             (!('refcMonth' in data) || data.refcMonth is string) &&
              data.createdBy == request.auth.uid &&
              data.createdAt is timestamp;
     }
@@ -208,7 +211,7 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidTransaction(request.resource.data);
       allow update: if isAuthenticated() && isValidTransaction(request.resource.data) && areImmutableFieldsUnchanged(['createdBy', 'createdAt']) && (isAdmin() || request.auth.uid == resource.data.createdBy);
-      allow delete: if isAuthenticated() && isAdmin();
+      allow delete: if isAuthenticated() && (isAdmin() || !('createdBy' in resource.data) || request.auth.uid == resource.data.createdBy || ('refcMonth' in resource.data));
     }
 
     match /settings/{docId} {
@@ -239,6 +242,11 @@ service cloud.firestore {
     match /logs/{logId} {
       allow read: if isAuthenticated() && isAdmin();
       allow create: if isAuthenticated();
+    }
+
+    match /refc_reports/{reportId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
     }
   }
 }

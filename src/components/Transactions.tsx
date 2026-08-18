@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { collection, query, onSnapshot, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, orderBy, getDoc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { Plus, Edit2, Trash2, Search, Filter, X } from 'lucide-react';
+import { Plus, Edit2, Trash2, Search, Filter, X, Sparkles, ArrowLeftRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { cn } from '../lib/utils';
 import { logAction } from '../lib/logger';
+import RefcEntryForm, { parseCurrencyInput } from './RefcEntryForm';
 
 interface Transaction {
   id: string;
@@ -23,6 +24,7 @@ interface Transaction {
 }
 
 export default function Transactions() {
+  const [activeTab, setActiveTab] = useState<'refc' | 'individual'>('refc');
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [destinations, setDestinations] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -81,11 +83,12 @@ export default function Transactions() {
     const { type, data, id } = pendingAction;
 
     try {
+      const parsedAmount = parseCurrencyInput(data.amount);
       if (type === 'update' && editingTransaction) {
         await updateDoc(doc(db, 'transactions', editingTransaction.id), {
           ...data,
           destination: data.destination || '',
-          amount: parseFloat(data.amount),
+          amount: parsedAmount,
           createdBy: auth.currentUser.uid,
           createdAt: serverTimestamp()
         });
@@ -94,7 +97,7 @@ export default function Transactions() {
         await addDoc(collection(db, 'transactions'), {
           ...data,
           destination: data.destination || '',
-          amount: parseFloat(data.amount),
+          amount: parsedAmount,
           createdBy: auth.currentUser.uid,
           createdAt: serverTimestamp()
         });
@@ -152,34 +155,69 @@ export default function Transactions() {
   });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 w-full max-w-full">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-zinc-900">Lancamentos</h1>
-          <p className="text-zinc-500">Gerencie dizimos, ofertas e despesas</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-zinc-900">Lançamentos Financeiros</h1>
+          <p className="text-xs sm:text-sm text-zinc-500">
+            Lançamentos mensais do REFC (cultos e despesas) e controle de entradas e saídas avulsas
+          </p>
         </div>
-        <button
-          onClick={() => {
-            setEditingTransaction(null);
-            setFormData({
-              type: 'tithe',
-              amount: '',
-              date: format(new Date(), 'yyyy-MM-dd'),
-              description: '',
-              destination: '',
-              category: '',
-              notes: ''
-            });
-            setIsModalOpen(true);
-          }}
-          className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2.5 font-semibold text-white transition-all hover:bg-zinc-800 active:scale-95"
-        >
-          <Plus size={20} />
-          Novo Lançamento
-        </button>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Alternador de Abas de Lançamento */}
+          <div className="flex rounded-xl border border-zinc-200 bg-zinc-100 p-1">
+            <button
+              onClick={() => setActiveTab('refc')}
+              className={cn(
+                "flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-bold transition-all",
+                activeTab === 'refc' ? "bg-white text-blue-700 shadow-sm" : "text-zinc-500 hover:text-zinc-900"
+              )}
+            >
+              <Sparkles size={14} className="text-blue-600" />
+              Lançamentos REFC / Cultos
+            </button>
+            <button
+              onClick={() => setActiveTab('individual')}
+              className={cn(
+                "flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-bold transition-all",
+                activeTab === 'individual' ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-900"
+              )}
+            >
+              <ArrowLeftRight size={14} />
+              Lançamentos Avulsos / Geral
+            </button>
+          </div>
+
+          {activeTab === 'individual' && (
+            <button
+              onClick={() => {
+                setEditingTransaction(null);
+                setFormData({
+                  type: 'tithe',
+                  amount: '',
+                  date: format(new Date(), 'yyyy-MM-dd'),
+                  description: '',
+                  destination: '',
+                  category: '',
+                  notes: ''
+                });
+                setIsModalOpen(true);
+              }}
+              className="flex items-center gap-2 rounded-xl bg-zinc-900 px-4 py-2 text-xs sm:text-sm font-bold text-white transition-all hover:bg-zinc-800 active:scale-95"
+            >
+              <Plus size={16} />
+              Novo Lançamento
+            </button>
+          )}
+        </div>
       </header>
 
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+      {activeTab === 'refc' ? (
+        <RefcEntryForm />
+      ) : (
+        <>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
           <input
@@ -309,14 +347,14 @@ export default function Transactions() {
                     </select>
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-bold uppercase tracking-wider text-zinc-500">Valor</label>
+                    <label className="text-xs font-bold uppercase tracking-wider text-zinc-500">Valor (R$)</label>
                     <input
-                      type="number"
-                      step="0.01"
+                      type="text"
+                      inputMode="decimal"
                       required
                       value={formData.amount}
                       onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-                      className="w-full rounded-lg border border-zinc-200 bg-zinc-50 p-2.5 outline-none focus:ring-2 focus:ring-zinc-900/10"
+                      className="w-full rounded-lg border border-zinc-200 bg-zinc-50 p-2.5 outline-none focus:ring-2 focus:ring-zinc-900/10 font-bold"
                       placeholder="0,00"
                     />
                   </div>
@@ -438,6 +476,8 @@ export default function Transactions() {
           </div>
         )}
       </AnimatePresence>
+        </>
+      )}
     </div>
   );
 }

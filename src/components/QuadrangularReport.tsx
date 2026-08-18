@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { 
   Printer, 
   Download, 
@@ -18,7 +19,9 @@ import {
   ArrowDownCircle,
   FileText,
   Pencil,
-  X
+  X,
+  Database,
+  RefreshCw
 } from 'lucide-react';
 import { format, parseISO, getDaysInMonth, startOfMonth, getDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -26,9 +29,11 @@ import { cn } from '../lib/utils';
 import * as XLSX from 'xlsx';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
-import { collection, query, where, getDocs, addDoc, serverTimestamp, doc, getDoc, setDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, addDoc, deleteDoc, serverTimestamp, doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { logAction } from '../lib/logger';
+import AnnualConsolidatedReport from './AnnualConsolidatedReport';
+import { parseCurrencyInput } from './RefcEntryForm';
 
 interface DailyEntry {
   day: number;
@@ -61,10 +66,14 @@ interface ChurchInfo {
 }
 
 export default function QuadrangularReport({ role }: { role: string | null }) {
-  // Competência selecionada (ex: 2026-07)
-  const [selectedMonthYear, setSelectedMonthYear] = useState('2026-07');
-  const [activeTab, setActiveTab] = useState<'refc' | 'entradas' | 'expenses'>('refc');
+  const [searchParams, setSearchParams] = useSearchParams();
+  // Competência selecionada (pega da URL ou padrão para o mês corrente ex: 2026-08)
+  const [selectedMonthYear, setSelectedMonthYear] = useState(() => {
+    return searchParams.get('month') || format(new Date(), 'yyyy-MM');
+  });
+  const [activeTab, setActiveTab] = useState<'refc' | 'entradas' | 'expenses' | 'annual'>('refc');
   const [printMode, setPrintMode] = useState<'single' | 'both'>('single');
+  const [isSavingToDb, setIsSavingToDb] = useState(false);
   
   // Informações da Igreja e Liderança
   const [churchInfo, setChurchInfo] = useState<ChurchInfo>({
@@ -100,9 +109,12 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
 
   // Estado para Alteração/Edição de Despesa
   const [editingExpense, setEditingExpense] = useState<ExpenseEntry | null>(null);
+  const [editingExpenseIndex, setEditingExpenseIndex] = useState<number | null>(null);
+  const [deletingExpense, setDeletingExpense] = useState<{ exp: ExpenseEntry; index: number } | null>(null);
   const [editDate, setEditDate] = useState('');
   const [editDesc, setEditDesc] = useState('');
   const [editAmount, setEditAmount] = useState('');
+  const [editError, setEditError] = useState<string | null>(null);
 
   // Novo formulário de inserção rápida de despesa
   const [newExpenseDate, setNewExpenseDate] = useState('');
@@ -169,9 +181,37 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
     fetchChurchSettings();
   }, []);
 
-  // Inicializa a grade de dias quando o mês/ano muda
+  // Inicializa a grade de dias e sincroniza com Firestore em tempo real quando o mês/ano muda
   useEffect(() => {
+    // 1. Inicializa a grade básica e carrega localStorage
     initializeMonthGrid(selectedMonthYear);
+
+    // 2. Escuta Firestore em tempo real para carregar dados salvos em nuvem
+    const docRef = doc(db, 'refc_reports', selectedMonthYear);
+    const unsubscribe = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.dailyEntries && Array.isArray(data.dailyEntries)) {
+          setDailyEntries(data.dailyEntries);
+        }
+        if (data.expenses && Array.isArray(data.expenses)) {
+          setExpenses(data.expenses);
+        }
+        if (data.totalGeneralTarget !== undefined) setTotalGeneralTarget(data.totalGeneralTarget);
+        if (data.targetTithes !== undefined) setTargetTithes(data.targetTithes);
+        if (data.targetOfferingGeneral !== undefined) setTargetOfferingGeneral(data.targetOfferingGeneral);
+        if (data.targetOfferingSpecial !== undefined) setTargetOfferingSpecial(data.targetOfferingSpecial);
+        if (data.targetMissions !== undefined) setTargetMissions(data.targetMissions);
+        if (data.observations !== undefined) setObservations(data.observations);
+        if (data.stats) setStats(prev => ({ ...prev, ...data.stats }));
+      }
+    }, (err) => {
+      console.warn('Erro ao escutar dados do Firestore para', selectedMonthYear, err);
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, [selectedMonthYear]);
 
   // Função para criar a lista de dias do mês e carregar dados salvos
@@ -397,7 +437,7 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
 
   // Alterar valor manual em uma célula da tabela
   const handleCellChange = (day: number, field: 'tithes' | 'offeringGeneral' | 'offeringSpecial' | 'missions', valStr: string) => {
-    const val = parseFloat(valStr.replace(',', '.')) || 0;
+    const val = parseCurrencyInput(valStr);
     setDailyEntries(prev => prev.map(entry => {
       if (entry.day === day) {
         const updated = { ...entry, [field]: val };
@@ -409,24 +449,24 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
   };
 
   // Totais Calculados de Entradas
-  const totalTithesSum = dailyEntries.reduce((sum, d) => sum + (d.tithes || 0), 0);
-  const totalOfferingGenSum = dailyEntries.reduce((sum, d) => sum + (d.offeringGeneral || 0), 0);
-  const totalOfferingSpecSum = dailyEntries.reduce((sum, d) => sum + (d.offeringSpecial || 0), 0);
-  const totalMissionsSum = dailyEntries.reduce((sum, d) => sum + (d.missions || 0), 0);
-  const totalArrecadacao = totalTithesSum + totalOfferingGenSum + totalOfferingSpecSum + totalMissionsSum;
+  const totalTithesSum = Math.round(dailyEntries.reduce((sum, d) => sum + (d.tithes || 0), 0) * 100) / 100;
+  const totalOfferingGenSum = Math.round(dailyEntries.reduce((sum, d) => sum + (d.offeringGeneral || 0), 0) * 100) / 100;
+  const totalOfferingSpecSum = Math.round(dailyEntries.reduce((sum, d) => sum + (d.offeringSpecial || 0), 0) * 100) / 100;
+  const totalMissionsSum = Math.round(dailyEntries.reduce((sum, d) => sum + (d.missions || 0), 0) * 100) / 100;
+  const totalArrecadacao = Math.round((totalTithesSum + totalOfferingGenSum + totalOfferingSpecSum + totalMissionsSum) * 100) / 100;
 
   // Taxa da Região / Sede (25% sobre a arrecadação total)
   const taxaSede25 = Math.round((totalArrecadacao * 0.25) * 100) / 100;
 
   // Total para a Sede no Resumo Diário
-  const totalSedeResumo = taxaSede25 - totalMissionsSum;
+  const totalSedeResumo = Math.round((taxaSede25 - totalMissionsSum) * 100) / 100;
 
   // Totais de Saídas (incluindo a taxa de 25% da região)
-  const manualExpensesSum = expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
-  const totalSaidasComTaxa = manualExpensesSum + taxaSede25;
+  const manualExpensesSum = Math.round(expenses.reduce((sum, e) => sum + (e.amount || 0), 0) * 100) / 100;
+  const totalSaidasComTaxa = Math.round((manualExpensesSum + taxaSede25) * 100) / 100;
 
-  // Saldo Final do Mês
-  const saldoFinalMes = totalArrecadacao - totalSaidasComTaxa;
+  // Saldo Final do Mês = Total Arrecadado - Saídas
+  const saldoFinalMes = Math.round((totalArrecadacao - totalSaidasComTaxa) * 100) / 100;
 
   // Manipular Despesas
   const handleAddExpense = () => {
@@ -440,7 +480,7 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
       alert('Por favor, informe a descrição da despesa (ex: Água, Luz, Sustento Pastoral).');
       return;
     }
-    const val = parseFloat(newExpenseAmount.replace(',', '.')) || 0;
+    const val = parseCurrencyInput(newExpenseAmount);
     if (val <= 0) {
       alert('Por favor, informe um valor maior que zero para a despesa.');
       return;
@@ -517,49 +557,79 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
     }
   };
 
-  const handleOpenEditExpense = (exp: ExpenseEntry) => {
+  const handleOpenEditExpense = (exp: ExpenseEntry, index: number) => {
     setEditingExpense(exp);
+    setEditingExpenseIndex(index);
     setEditDate(exp.date || '');
     setEditDesc(exp.description || '');
-    setEditAmount(exp.amount ? exp.amount.toString() : '');
+    setEditAmount(exp.amount ? exp.amount.toFixed(2).replace('.', ',') : '');
+    setEditError(null);
   };
 
   const handleSaveEditExpense = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!editingExpense) return;
+    if (!editingExpense && editingExpenseIndex === null) return;
     if (!editDesc.trim()) {
-      alert('Por favor, informe a descrição da despesa.');
+      setEditError('Por favor, informe a descrição da despesa.');
       return;
     }
-    const val = parseFloat(editAmount.replace(',', '.')) || 0;
+    const val = parseCurrencyInput(editAmount);
     if (val <= 0) {
-      alert('Por favor, informe um valor maior que zero para a despesa.');
+      setEditError('Por favor, informe um valor maior que zero para a despesa.');
       return;
     }
 
-    setExpenses(prev => prev.map(exp => {
-      if (exp.id === editingExpense.id) {
-        return {
-          ...exp,
-          date: editDate.trim() || format(new Date(), 'dd/MM'),
-          description: editDesc.trim().toUpperCase(),
-          amount: val
-        };
-      }
-      return exp;
-    }));
+    setExpenses(prev => {
+      const existingIdx = prev.findIndex((exp, idx) => 
+        (editingExpense?.id && exp.id === editingExpense.id) || idx === editingExpenseIndex
+      );
 
+      if (existingIdx >= 0) {
+        return prev.map((exp, idx) => {
+          if (idx === existingIdx) {
+            return {
+              ...exp,
+              date: editDate.trim() || format(new Date(), 'dd/MM'),
+              description: editDesc.trim().toUpperCase(),
+              amount: val
+            };
+          }
+          return exp;
+        });
+      } else {
+        return [
+          ...prev,
+          {
+            id: editingExpense?.id || Math.random().toString(36).substring(2, 9),
+            date: editDate.trim() || format(new Date(), 'dd/MM'),
+            description: editDesc.trim().toUpperCase(),
+            amount: val
+          }
+        ];
+      }
+    });
+
+    const savedDesc = editDesc.trim().toUpperCase();
     setEditingExpense(null);
-    setSyncStatus(`Despesa "${editDesc.trim().toUpperCase()}" alterada com sucesso!`);
+    setEditingExpenseIndex(null);
+    setEditError(null);
+    setSyncStatus(`Despesa "${savedDesc}" alterada com sucesso!`);
     setTimeout(() => setSyncStatus(null), 3500);
   };
 
-  const handleRemoveExpense = (id: string, description?: string) => {
-    if (window.confirm(`Deseja realmente excluir a despesa "${description || 'selecionada'}"? Ela será removida da folha e dos cálculos.`)) {
-      setExpenses(prev => prev.filter(exp => exp.id !== id));
-      setSyncStatus('Despesa excluída com sucesso do REFC!');
-      setTimeout(() => setSyncStatus(null), 3000);
-    }
+  const handleConfirmDeleteExpense = () => {
+    if (!deletingExpense) return;
+    const { exp, index } = deletingExpense;
+    setExpenses(prev => prev.filter((item, idx) => {
+      if (exp.id && item.id) {
+        return item.id !== exp.id;
+      }
+      return idx !== index;
+    }));
+    const desc = exp.description || 'Despesa';
+    setDeletingExpense(null);
+    setSyncStatus(`"${desc}" excluída com sucesso do REFC!`);
+    setTimeout(() => setSyncStatus(null), 3000);
   };
 
   // Zerar todos os lançamentos do mês selecionado
@@ -584,6 +654,169 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
       } catch (e) {}
       setSyncStatus('Todos os valores foram zerados!');
       setTimeout(() => setSyncStatus(null), 3500);
+    }
+  };
+
+  // 💾 Salvar Lançamentos no Banco de Dados (Firestore) e Sincronizar com o Financeiro Geral
+  const handleSaveToDatabaseAndFinance = async () => {
+    setIsSavingToDb(true);
+    try {
+      // 1. Salvar na coleção refc_reports (Consolidação do REFC do Mês)
+      const reportDocRef = doc(db, 'refc_reports', selectedMonthYear);
+      await setDoc(reportDocRef, {
+        monthYear: selectedMonthYear,
+        year: currentYear,
+        month: currentMonthNum,
+        monthName: monthNameUpper,
+        churchInfo,
+        stats,
+        dailyEntries,
+        expenses,
+        totalGeneralTarget,
+        targetTithes,
+        targetOfferingGeneral,
+        targetOfferingSpecial,
+        targetMissions,
+        observations,
+        totals: {
+          totalTithes: totalTithesSum,
+          totalOfferingGeneral: totalOfferingGenSum,
+          totalOfferingSpecial: totalOfferingSpecSum,
+          totalMissions: totalMissionsSum,
+          totalArrecadacao,
+          taxaSede25,
+          totalExpenses: manualExpensesSum,
+          totalSaidas: totalSaidasComTaxa,
+          saldoFinal: saldoFinalMes
+        },
+        updatedAt: serverTimestamp(),
+        savedBy: auth.currentUser?.email || 'Usuário'
+      }, { merge: true });
+
+      // 2. Sincronizar com o Financeiro Geral (Coleção transactions)
+      // Buscar e remover transações antigas geradas pelo REFC deste mês para não duplicar
+      const qExisting = query(
+        collection(db, 'transactions'),
+        where('refcMonth', '==', selectedMonthYear)
+      );
+      const snapExisting = await getDocs(qExisting);
+      const deletePromises = snapExisting.docs.map(d => deleteDoc(doc(db, 'transactions', d.id)));
+      await Promise.all(deletePromises);
+
+      // Inserir os lançamentos do REFC no Financeiro
+      const newTransactions: any[] = [];
+      const currentUid = auth.currentUser?.uid || 'system';
+
+      dailyEntries.forEach(entry => {
+        const [d, m, y] = entry.dateStr.split('/');
+        const isoDate = `${y}-${m}-${d}`;
+
+        if (entry.tithes > 0) {
+          newTransactions.push({
+            type: 'tithe',
+            amount: entry.tithes,
+            date: isoDate,
+            description: `Dízimos Culto ${entry.dayOfWeekName} (${entry.dateStr})`,
+            category: 'Dízimo REFC',
+            destination: 'Igreja Local',
+            createdBy: currentUid,
+            createdAt: serverTimestamp(),
+            refcMonth: selectedMonthYear
+          });
+        }
+        if (entry.offeringGeneral > 0) {
+          newTransactions.push({
+            type: 'offering',
+            amount: entry.offeringGeneral,
+            date: isoDate,
+            description: `Oferta Geral Culto ${entry.dayOfWeekName} (${entry.dateStr})`,
+            category: 'Oferta Geral REFC',
+            destination: 'Igreja Local',
+            createdBy: currentUid,
+            createdAt: serverTimestamp(),
+            refcMonth: selectedMonthYear
+          });
+        }
+        if (entry.offeringSpecial > 0) {
+          newTransactions.push({
+            type: 'offering',
+            amount: entry.offeringSpecial,
+            date: isoDate,
+            description: `Oferta Especial Culto ${entry.dayOfWeekName} (${entry.dateStr})`,
+            category: 'Oferta Especial REFC',
+            destination: 'Igreja Local',
+            createdBy: currentUid,
+            createdAt: serverTimestamp(),
+            refcMonth: selectedMonthYear
+          });
+        }
+        if (entry.missions > 0) {
+          newTransactions.push({
+            type: 'offering',
+            amount: entry.missions,
+            date: isoDate,
+            description: `Oferta de Missões - 3º Domingo (${entry.dateStr})`,
+            category: 'Missões REFC',
+            destination: 'Secretaria de Missões',
+            createdBy: currentUid,
+            createdAt: serverTimestamp(),
+            refcMonth: selectedMonthYear
+          });
+        }
+      });
+
+      // Inserir Despesas do REFC no Financeiro
+      expenses.forEach(exp => {
+        let expDate = exp.date;
+        if (expDate.includes('/')) {
+          const parts = expDate.split('/');
+          if (parts.length === 2) {
+            expDate = `${currentYear}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+          } else if (parts.length === 3) {
+            expDate = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+          }
+        }
+        newTransactions.push({
+          type: 'expense',
+          amount: exp.amount,
+          date: expDate || `${currentYear}-${currentMonthNum}-15`,
+          description: exp.description || 'DESPESA OPERACIONAL REFC',
+          category: 'Despesa REFC',
+          destination: 'Igreja Local',
+          createdBy: currentUid,
+          createdAt: serverTimestamp(),
+          refcMonth: selectedMonthYear
+        });
+      });
+
+      // Inserir Taxa da Região (25%) no Financeiro
+      if (taxaSede25 > 0) {
+        newTransactions.push({
+          type: 'expense',
+          amount: taxaSede25,
+          date: `${currentYear}-${currentMonthNum}-28`,
+          description: `Taxa da Região/Sede (25%) - ${competenciaExtenso}`,
+          category: 'Taxa Regional Sede',
+          destination: 'Sede Regional IEQ',
+          createdBy: currentUid,
+          createdAt: serverTimestamp(),
+          refcMonth: selectedMonthYear
+        });
+      }
+
+      // Executar inserção no Firestore
+      const addPromises = newTransactions.map(t => addDoc(collection(db, 'transactions'), t));
+      await Promise.all(addPromises);
+
+      await logAction('REFC Salvar Lançamentos', `Sincronizou ${newTransactions.length} lançamentos de ${competenciaExtenso} com o Financeiro`);
+      setSyncStatus(`Lançamentos salvos no banco de dados e sincronizados no Módulo Financeiro (${newTransactions.length} lançamentos registrados)!`);
+      setTimeout(() => setSyncStatus(null), 5000);
+      alert(`Sucesso!\n\nTodos os lançamentos do REFC de ${competenciaExtenso} foram gravados no banco de dados e sincronizados no Módulo Financeiro Geral da Igreja (${newTransactions.length} lançamentos registrados).`);
+    } catch (err: any) {
+      console.error('Erro ao salvar no BD:', err);
+      alert('Erro ao salvar lançamentos no banco de dados: ' + err.message);
+    } finally {
+      setIsSavingToDb(false);
     }
   };
 
@@ -690,7 +923,56 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
     XLSX.writeFile(wb, `RELATORIO_QUADRANGULAR_${monthNameUpper}_${currentYear}.xlsx`);
   };
 
-  // Gerar PDF direto de alta resolução (1 Página A4 para cada Aba)
+  // Utilitário confiável para captura de folha A4 com html2canvas mesmo quando a aba está oculta
+  const captureSheet = async (elementId: string): Promise<HTMLCanvasElement | null> => {
+    const elem = document.getElementById(elementId);
+    if (!elem) {
+      console.warn(`Elemento #${elementId} não encontrado no DOM.`);
+      return null;
+    }
+
+    const isHidden = elem.classList.contains('hidden') || elem.style.display === 'none' || window.getComputedStyle(elem).display === 'none';
+    let clone: HTMLElement | null = null;
+    let targetElem = elem;
+
+    if (isHidden) {
+      clone = elem.cloneNode(true) as HTMLElement;
+      clone.id = `${elementId}-temp-clone`;
+      clone.classList.remove('hidden', 'print:hidden');
+      clone.style.display = 'block';
+      clone.style.visibility = 'visible';
+      clone.style.position = 'fixed';
+      clone.style.left = '-9999px';
+      clone.style.top = '0';
+      clone.style.width = '794px'; // 210mm em 96 DPI
+      clone.style.minHeight = '1123px'; // 297mm em 96 DPI
+      clone.style.zIndex = '-9999';
+      document.body.appendChild(clone);
+      targetElem = clone;
+    }
+
+    try {
+      await new Promise(resolve => setTimeout(resolve, 80));
+      const canvas = await html2canvas(targetElem, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+        windowWidth: 1000
+      });
+      return canvas;
+    } catch (err) {
+      console.error(`Erro ao capturar folha ${elementId}:`, err);
+      throw err;
+    } finally {
+      if (clone && clone.parentNode) {
+        clone.parentNode.removeChild(clone);
+      }
+    }
+  };
+
+  // Gerar PDF direto de alta resolução (1 Página A4 para cada Aba ou Completo com 2 Páginas)
   const handleDownloadPdf = async (targetTab: 'refc' | 'entradas' | 'expenses' | 'both') => {
     setIsGeneratingPdf(true);
     try {
@@ -701,15 +983,9 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
       const effectiveTab = targetTab === 'expenses' ? 'refc' : targetTab;
 
       if (effectiveTab === 'refc' || effectiveTab === 'both') {
-        const elem = document.getElementById('print-refc-sheet');
-        if (elem) {
-          const canvas = await html2canvas(elem, {
-            scale: 2,
-            useCORS: true,
-            logging: false,
-            backgroundColor: '#ffffff'
-          });
-          const imgData = canvas.toDataURL('image/png');
+        const canvasRefc = await captureSheet('print-refc-sheet');
+        if (canvasRefc) {
+          const imgData = canvasRefc.toDataURL('image/png');
           pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
         }
       }
@@ -719,15 +995,9 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
       }
 
       if (effectiveTab === 'entradas' || effectiveTab === 'both') {
-        const elem = document.getElementById('print-entradas-sheet');
-        if (elem) {
-          const canvas = await html2canvas(elem, {
-            scale: 2,
-            useCORS: true,
-            logging: false,
-            backgroundColor: '#ffffff'
-          });
-          const imgData = canvas.toDataURL('image/png');
+        const canvasEntradas = await captureSheet('print-entradas-sheet');
+        if (canvasEntradas) {
+          const imgData = canvasEntradas.toDataURL('image/png');
           if (effectiveTab === 'entradas') {
             pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
           } else {
@@ -737,10 +1007,13 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
         }
       }
 
-      pdf.save(`RELATORIO_QUADRANGULAR_${effectiveTab.toUpperCase()}_${monthNameUpper}_${currentYear}.pdf`);
+      const fileName = `RELATORIO_QUADRANGULAR_${effectiveTab === 'both' ? 'COMPLETO_2PAGS' : effectiveTab.toUpperCase()}_${monthNameUpper}_${currentYear}.pdf`;
+      pdf.save(fileName);
+      setSyncStatus('PDF baixado com sucesso!');
+      setTimeout(() => setSyncStatus(null), 3000);
     } catch (err: any) {
       console.error('Erro ao gerar PDF:', err);
-      alert('Erro ao gerar arquivo PDF. Você também pode usar o botão Imprimir.');
+      alert('Não foi possível gerar o PDF direto. Você também pode clicar no botão "Imprimir" e selecionar "Salvar como PDF" no navegador.');
     } finally {
       setIsGeneratingPdf(false);
     }
@@ -749,48 +1022,59 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
   // Disparar Impressão Oficial do Navegador
   const handlePrint = (mode: 'single' | 'both') => {
     setPrintMode(mode);
+
+    const handleAfterPrint = () => {
+      setPrintMode('single');
+      window.removeEventListener('afterprint', handleAfterPrint);
+    };
+    window.addEventListener('afterprint', handleAfterPrint);
+
     setTimeout(() => {
       window.print();
-    }, 200);
+    }, 250);
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 w-full max-w-full overflow-hidden">
       {/* Barra Superior de Controle */}
-      <div className="flex flex-col gap-4 rounded-2xl bg-white p-5 border border-zinc-200 shadow-sm print:hidden">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
+      <div className="flex flex-col gap-4 rounded-2xl bg-white p-4 sm:p-5 border border-zinc-200 shadow-sm print:hidden w-full max-w-full">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="inline-flex items-center rounded-md bg-amber-50 px-2 py-1 text-xs font-bold text-amber-700 ring-1 ring-inset ring-amber-600/20">
                 Modelo Oficial
               </span>
-              <h2 className="text-xl font-bold text-zinc-900">Relatório Quadrangular (REFC & Entradas)</h2>
+              <h2 className="text-lg sm:text-xl font-bold text-zinc-900 truncate">
+                Relatório Quadrangular (REFC, Entradas & Anual)
+              </h2>
             </div>
-            <p className="text-sm text-zinc-500">
-              Divisão automática nos dias de culto (Terça, Sexta e Domingo) e cálculo exato dos 25% da Sede.
+            <p className="text-xs sm:text-sm text-zinc-500 mt-0.5">
+              Lançamentos oficiais de cultos, despesas discriminadas, 25% da Sede e consolidação anual de todos os meses.
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            {/* Seletor de Competência */}
-            <div className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
-              <Calendar size={18} className="text-zinc-500" />
-              <label htmlFor="competence-select" className="text-xs font-bold text-zinc-600 uppercase">Mês:</label>
-              <input
-                id="competence-select"
-                type="month"
-                value={selectedMonthYear}
-                onChange={(e) => setSelectedMonthYear(e.target.value)}
-                className="bg-transparent font-bold text-zinc-900 outline-none cursor-pointer"
-              />
-            </div>
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            {/* Seletor de Competência (oculto quando no anual) */}
+            {activeTab !== 'annual' && (
+              <div className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
+                <Calendar size={16} className="text-zinc-500" />
+                <label htmlFor="competence-select" className="text-xs font-bold text-zinc-600 uppercase">Mês:</label>
+                <input
+                  id="competence-select"
+                  type="month"
+                  value={selectedMonthYear}
+                  onChange={(e) => setSelectedMonthYear(e.target.value)}
+                  className="bg-transparent font-bold text-zinc-900 outline-none cursor-pointer text-xs sm:text-sm"
+                />
+              </div>
+            )}
 
             {/* Alternador de Abas de Visualização */}
-            <div className="flex rounded-xl border border-zinc-200 bg-zinc-100 p-1">
+            <div className="flex flex-wrap rounded-xl border border-zinc-200 bg-zinc-100 p-1 gap-1">
               <button
                 onClick={() => setActiveTab('refc')}
                 className={cn(
-                  "rounded-lg px-3.5 py-2 text-xs font-bold transition-all flex items-center gap-1.5",
+                  "rounded-lg px-2.5 sm:px-3 py-1.5 text-xs font-bold transition-all flex items-center gap-1.5",
                   activeTab === 'refc' ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-900"
                 )}
               >
@@ -800,7 +1084,7 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
               <button
                 onClick={() => setActiveTab('entradas')}
                 className={cn(
-                  "rounded-lg px-3.5 py-2 text-xs font-bold transition-all flex items-center gap-1.5",
+                  "rounded-lg px-2.5 sm:px-3 py-1.5 text-xs font-bold transition-all flex items-center gap-1.5",
                   activeTab === 'entradas' ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-900"
                 )}
               >
@@ -808,644 +1092,92 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
                 2. Entradas (Cultos)
               </button>
               <button
-                onClick={() => setActiveTab('expenses')}
+                onClick={() => setActiveTab('annual')}
                 className={cn(
-                  "rounded-lg px-3.5 py-2 text-xs font-bold transition-all flex items-center gap-1.5",
-                  activeTab === 'expenses' ? "bg-white text-rose-700 shadow-sm" : "text-zinc-500 hover:text-zinc-900"
+                  "rounded-lg px-2.5 sm:px-3 py-1.5 text-xs font-bold transition-all flex items-center gap-1.5",
+                  activeTab === 'annual' ? "bg-white text-purple-800 shadow-sm" : "text-zinc-500 hover:text-zinc-900"
                 )}
               >
-                <ArrowDownCircle size={14} className="text-rose-600" />
-                3. Inserir Despesas ({expenses.length})
+                <Calendar size={14} className="text-purple-600" />
+                3. Consolidado Anual (12 Meses)
               </button>
             </div>
 
-            {/* Botões de Ação de Impressão e Download */}
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => handlePrint('single')}
-                className="flex items-center gap-1.5 rounded-xl bg-zinc-900 px-3.5 py-2 text-xs font-bold text-white shadow-sm hover:bg-zinc-800 transition-all active:scale-95"
-                title="Imprime exatamente 1 página A4 da aba selecionada"
-              >
-                <Printer size={15} />
-                Imprimir Aba Atual (1 Pág)
-              </button>
-
-              <button
-                onClick={() => handlePrint('both')}
-                className="flex items-center gap-1.5 rounded-xl border border-zinc-900 bg-white px-3.5 py-2 text-xs font-bold text-zinc-900 shadow-sm hover:bg-zinc-50 transition-all active:scale-95"
-                title="Imprime as 2 páginas (REFC + Entradas)"
-              >
-                <Printer size={15} />
-                Imprimir Ambas (2 Págs)
-              </button>
-
-              <button
-                onClick={() => handleDownloadPdf(activeTab)}
-                disabled={isGeneratingPdf}
-                className="flex items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-bold text-zinc-700 hover:bg-zinc-50 transition-all active:scale-95 disabled:opacity-50"
-                title="Baixar PDF Oficial"
-              >
-                <Download size={15} />
-                {isGeneratingPdf ? 'Gerando...' : 'PDF'}
-              </button>
-
-              <button
-                onClick={handleExportExcel}
-                className="flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100 transition-all active:scale-95"
-                title="Exportar Planilha Excel com fórmulas"
-              >
-                <FileSpreadsheet size={15} />
-                Excel (.xlsx)
-              </button>
-
-              <button
-                onClick={handleClearAll}
-                className="flex items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-bold text-zinc-500 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 transition-all active:scale-95"
-                title="Zerar todos os lançamentos de entradas e saídas deste mês"
-              >
-                <RotateCcw size={14} />
-                Zerar Mês
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ⚡ PAINEL MÁGICO: LANÇAMENTO DO TOTAL & DIVISÃO AUTOMÁTICA NOS CULTOS */}
-      <div className="rounded-2xl border border-blue-200 bg-gradient-to-br from-blue-50/70 via-indigo-50/40 to-white p-5 shadow-sm print:hidden">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 border-b border-blue-100 pb-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm">
-              <Sparkles size={22} />
-            </div>
-            <div>
-              <h3 className="text-base font-bold text-zinc-900 flex items-center gap-2">
-                Divisão Automática de Cultos (Terça, Sexta e Domingo)
-              </h3>
-              <p className="text-xs text-zinc-500">
-                Digite o valor total do mês e o sistema distribui perfeitamente em todos os cultos de {competenciaExtenso}, com a oferta de missões no 3º domingo!
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <div className="flex rounded-lg border border-blue-200 bg-white p-0.5 text-xs font-semibold">
-              <button
-                onClick={() => setDistMode('total')}
-                className={cn(
-                  "rounded-md px-3 py-1.5 transition-all",
-                  distMode === 'total' ? "bg-blue-600 text-white shadow-xs" : "text-zinc-600 hover:text-zinc-900"
-                )}
-              >
-                Valor Total Global
-              </button>
-              <button
-                onClick={() => setDistMode('detailed')}
-                className={cn(
-                  "rounded-md px-3 py-1.5 transition-all",
-                  distMode === 'detailed' ? "bg-blue-600 text-white shadow-xs" : "text-zinc-600 hover:text-zinc-900"
-                )}
-              >
-                Totais por Categoria
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Inputs de Valores */}
-        <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3 items-end">
-          {distMode === 'total' ? (
-            <div className="sm:col-span-2">
-              <label className="block text-xs font-bold text-zinc-700 mb-1">
-                Valor Total Arrecadado no Mês (R$)
-              </label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold text-zinc-400">R$</span>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={totalGeneralTarget}
-                  onChange={(e) => setTotalGeneralTarget(e.target.value)}
-                  placeholder="Ex: 4300.00"
-                  className="w-full rounded-xl border border-blue-300 bg-white py-2 pl-10 pr-3 text-base font-bold text-blue-950 focus:border-blue-600 focus:outline-hidden shadow-xs"
-                />
-              </div>
-            </div>
-          ) : (
-            <>
-              <div>
-                <label className="block text-xs font-bold text-zinc-700 mb-1">Total Dízimos (R$)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={targetTithes}
-                  onChange={(e) => setTargetTithes(e.target.value)}
-                  placeholder="3500.00"
-                  className="w-full rounded-xl border border-zinc-300 bg-white py-2 px-3 text-sm font-bold text-zinc-900 focus:border-blue-600 focus:outline-hidden"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-zinc-700 mb-1">Oferta Geral (R$)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={targetOfferingGeneral}
-                  onChange={(e) => setTargetOfferingGeneral(e.target.value)}
-                  placeholder="600.00"
-                  className="w-full rounded-xl border border-zinc-300 bg-white py-2 px-3 text-sm font-bold text-zinc-900 focus:border-blue-600 focus:outline-hidden"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-zinc-700 mb-1">Oferta Especial (R$)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={targetOfferingSpecial}
-                  onChange={(e) => setTargetOfferingSpecial(e.target.value)}
-                  placeholder="150.00"
-                  className="w-full rounded-xl border border-zinc-300 bg-white py-2 px-3 text-sm font-bold text-zinc-900 focus:border-blue-600 focus:outline-hidden"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-zinc-700 mb-1">3º Dom. (Missões) (R$)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={targetMissions}
-                  onChange={(e) => setTargetMissions(e.target.value)}
-                  placeholder="50.00"
-                  className="w-full rounded-xl border border-zinc-300 bg-white py-2 px-3 text-sm font-bold text-zinc-900 focus:border-blue-600 focus:outline-hidden"
-                />
-              </div>
-            </>
-          )}
-
-          <div className="sm:col-span-2 lg:col-span-1">
-            <button
-              onClick={handleAutoDistribute}
-              className="w-full flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-bold text-white shadow-md shadow-blue-500/20 hover:bg-blue-700 transition-all active:scale-95"
-            >
-              <Sparkles size={16} />
-              Distribuir nos Cultos
-            </button>
-          </div>
-        </div>
-
-        {syncStatus && (
-          <div className="mt-3 flex items-center gap-2 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-2 animate-fade-in">
-            <CheckCircle2 size={16} className="text-emerald-600" />
-            {syncStatus}
-          </div>
-        )}
-
-        {/* Resumo Instantâneo dos Cálculos */}
-        <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-blue-100 text-center">
-          <div className="rounded-xl bg-white/80 p-2.5 border border-zinc-200/80">
-            <p className="text-[10px] font-bold uppercase text-zinc-400">Total Arrecadado</p>
-            <p className="text-sm font-bold text-blue-700">{fmtCurrency(totalArrecadacao)}</p>
-          </div>
-          <div className="rounded-xl bg-white/80 p-2.5 border border-zinc-200/80">
-            <p className="text-[10px] font-bold uppercase text-zinc-400">Sede / Região (25%)</p>
-            <p className="text-sm font-bold text-indigo-700">{fmtCurrency(taxaSede25)}</p>
-          </div>
-          <div className="rounded-xl bg-white/80 p-2.5 border border-zinc-200/80">
-            <p className="text-[10px] font-bold uppercase text-zinc-400">Total de Saídas</p>
-            <p className="text-sm font-bold text-rose-600">{fmtCurrency(totalSaidasComTaxa)}</p>
-          </div>
-          <div className="rounded-xl bg-white/80 p-2.5 border border-zinc-200/80">
-            <p className="text-[10px] font-bold uppercase text-zinc-400">Saldo Líquido</p>
-            <p className={cn("text-sm font-bold", saldoFinalMes >= 0 ? "text-emerald-600" : "text-amber-600")}>
-              {fmtCurrency(saldoFinalMes)}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* 💸 PAINEL PRINCIPAL DE LANÇAMENTO & GESTÃO DE DESPESAS / SAÍDAS DO REFC */}
-      <div className={cn(
-        "rounded-2xl border border-rose-200 bg-gradient-to-br from-rose-50/80 via-orange-50/30 to-white p-5 shadow-sm print:hidden",
-        activeTab === 'entradas' ? "hidden" : "block"
-      )}>
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 border-b border-rose-100 pb-3.5">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-600 text-white shadow-sm">
-              <ArrowDownCircle size={22} />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-base font-bold text-zinc-900">
-                  Lançamento de Despesas / Saídas (REFC)
-                </h3>
-                <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-bold text-rose-700">
-                  {expenses.length} lançadas
-                </span>
-              </div>
-              <p className="text-xs text-zinc-500">
-                Insira as saídas do mês de {competenciaExtenso} (Água, Luz, Sustento Pastoral, etc.). O total e os 25% da Sede são recalculados em tempo real!
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleImportExpensesFromFirestore}
-              disabled={isImportingExpenses}
-              className="flex items-center gap-1.5 rounded-xl border border-rose-300 bg-white px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-50 transition-all shadow-xs disabled:opacity-50"
-              title="Importa as despesas que já foram lançadas no módulo Financeiro da igreja"
-            >
-              <Download size={14} />
-              {isImportingExpenses ? 'Importando...' : '📥 Importar do Módulo Financeiro'}
-            </button>
-            
-            <button
-              onClick={handleAddExpense}
-              className="flex items-center gap-1.5 rounded-xl bg-rose-600 px-3.5 py-2 text-xs font-bold text-white hover:bg-rose-700 transition-all shadow-xs"
-            >
-              <Plus size={14} /> Nova Linha
-            </button>
-          </div>
-        </div>
-
-        {/* Formulário de Inserção Rápida de Despesa */}
-        <form onSubmit={handleQuickAddExpense} className="mt-4 grid grid-cols-1 sm:grid-cols-12 gap-3 items-end bg-white/80 p-3.5 rounded-xl border border-rose-100 shadow-xs">
-          <div className="sm:col-span-3">
-            <label className="block text-xs font-bold text-zinc-700 mb-1">
-              Data (ex: 05/07 ou AAAA-MM-DD)
-            </label>
-            <input
-              type="text"
-              placeholder="ex: 10/07"
-              value={newExpenseDate}
-              onChange={(e) => setNewExpenseDate(e.target.value)}
-              className="w-full rounded-lg border border-zinc-300 bg-white py-2 px-3 text-xs font-mono font-bold text-zinc-900 focus:border-rose-600 focus:outline-hidden"
-            />
-          </div>
-
-          <div className="sm:col-span-5">
-            <label className="block text-xs font-bold text-zinc-700 mb-1">
-              Descrição da Despesa / Saída
-            </label>
-            <input
-              type="text"
-              placeholder="Ex: TAXA DE LUZ, SUSTENTO PASTORAL..."
-              value={newExpenseDesc}
-              onChange={(e) => setNewExpenseDesc(e.target.value)}
-              className="w-full rounded-lg border border-zinc-300 bg-white py-2 px-3 text-xs font-bold uppercase text-zinc-900 focus:border-rose-600 focus:outline-hidden"
-            />
-          </div>
-
-          <div className="sm:col-span-2">
-            <label className="block text-xs font-bold text-zinc-700 mb-1">
-              Valor (R$)
-            </label>
-            <div className="relative">
-              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-zinc-400">R$</span>
-              <input
-                type="number"
-                step="0.01"
-                placeholder="0.00"
-                value={newExpenseAmount}
-                onChange={(e) => setNewExpenseAmount(e.target.value)}
-                className="w-full rounded-lg border border-zinc-300 bg-white py-2 pl-8 pr-2 text-xs font-mono font-bold text-zinc-900 focus:border-rose-600 focus:outline-hidden"
-              />
-            </div>
-          </div>
-
-          <div className="sm:col-span-2">
-            <button
-              type="submit"
-              className="w-full flex items-center justify-center gap-1.5 rounded-lg bg-rose-600 py-2 px-3 text-xs font-bold text-white hover:bg-rose-700 transition-all shadow-sm"
-            >
-              <Plus size={15} /> Inserir Despesa
-            </button>
-          </div>
-        </form>
-
-        {/* Sugestões Rápidas de Despesas Comuns */}
-        <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] font-bold text-zinc-500 mr-1">Sugestões rápidas:</span>
-          {commonExpenseSuggestions.map((sug) => (
-            <button
-              key={sug}
-              type="button"
-              onClick={() => {
-                setNewExpenseDesc(sug);
-                if (!newExpenseDate) setNewExpenseDate(format(new Date(), 'dd/MM'));
-              }}
-              className="rounded-lg border border-rose-200/80 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-300 transition-all"
-            >
-              + {sug}
-            </button>
-          ))}
-        </div>
-
-        {/* Lista de Despesas Lançadas com Botões de Alterar e Excluir */}
-        <div className="mt-4 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xs">
-          <div className="bg-zinc-50 px-4 py-2.5 text-xs font-bold text-zinc-700 flex items-center justify-between border-b border-zinc-200">
-            <span className="flex items-center gap-2">
-              <FileText size={15} className="text-rose-600" />
-              Despesas Registradas na Folha REFC ({expenses.length})
-            </span>
-            <div className="flex items-center gap-3">
-              <span className="font-mono text-rose-700 font-bold text-sm">
-                Total Saídas: {fmtCurrency(manualExpensesSum)}
-              </span>
-              {expenses.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (window.confirm('Deseja excluir todas as despesas lançadas deste mês?')) {
-                      setExpenses([]);
-                      setSyncStatus('Todas as despesas foram removidas.');
-                      setTimeout(() => setSyncStatus(null), 3000);
-                    }
-                  }}
-                  className="text-[11px] text-zinc-400 hover:text-rose-600 font-semibold underline"
+            {/* Botões de Ação de Impressão, Download e Link para Lançamentos */}
+            {activeTab !== 'annual' && (
+              <div className="flex flex-wrap items-center gap-2">
+                <a
+                  href="#/transactions"
+                  className="flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100 transition-all active:scale-95 shadow-xs"
+                  title="Ir para o menu de Lançamentos para alterar valores ou lançar cultos e despesas"
                 >
-                  Limpar todas
-                </button>
-              )}
-            </div>
-          </div>
+                  <Sparkles size={14} />
+                  Fazer Lançamentos
+                </a>
 
-          {expenses.length === 0 ? (
-            <div className="p-8 text-center text-xs text-zinc-400 flex flex-col items-center justify-center gap-2">
-              <ArrowDownCircle size={28} className="text-zinc-300" />
-              <p className="font-semibold text-zinc-600">Nenhuma despesa lançada no momento.</p>
-              <p className="text-[11px] text-zinc-400 max-w-md">
-                Utilize o formulário acima para inserir as saídas da igreja (Água, Luz, Sustento Pastoral, etc.) ou clique em uma das sugestões rápidas. Todas as despesas entrarão automaticamente no cálculo do REFC.
-              </p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs text-left border-collapse">
-                <thead>
-                  <tr className="bg-zinc-100/80 border-b border-zinc-200 text-zinc-600 font-bold uppercase text-[10px]">
-                    <th className="py-2.5 px-3 w-28">Data</th>
-                    <th className="py-2.5 px-3">Descriminação da Saída</th>
-                    <th className="py-2.5 px-3 text-right w-36">Valor</th>
-                    <th className="py-2.5 px-3 text-center w-44">Ações</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-zinc-100">
-                  {expenses.map((exp) => (
-                    <tr key={exp.id} className="hover:bg-rose-50/30 transition-colors group">
-                      <td className="py-2.5 px-3 font-mono font-bold text-zinc-800">
-                        {exp.date || '-'}
-                      </td>
-                      <td className="py-2.5 px-3 font-bold uppercase text-zinc-900">
-                        {exp.description}
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-mono font-bold text-rose-700 text-sm">
-                        {fmtCurrency(exp.amount)}
-                      </td>
-                      <td className="py-2.5 px-3 text-center">
-                        <div className="flex items-center justify-center gap-1.5">
-                          {/* Botão Alterar */}
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEditExpense(exp)}
-                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 font-bold text-[11px] transition-all shadow-2xs active:scale-95"
-                            title="Alterar valor, descrição ou data desta despesa"
-                          >
-                            <Pencil size={12} />
-                            Alterar
-                          </button>
-
-                          {/* Botão Excluir */}
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveExpense(exp.id, exp.description)}
-                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 font-bold text-[11px] transition-all shadow-2xs active:scale-95"
-                            title="Excluir esta despesa do relatório"
-                          >
-                            <Trash2 size={12} />
-                            Excluir
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* MODAL / DIALOG DE ALTERAÇÃO DE DESPESA */}
-      {editingExpense && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs animate-fade-in print:hidden">
-          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl border border-zinc-200">
-            <div className="flex items-center justify-between border-b border-zinc-100 pb-3 mb-4">
-              <div className="flex items-center gap-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-100 text-blue-700">
-                  <Pencil size={16} />
+                {/* Grupo de Impressão */}
+                <div className="flex items-center rounded-xl bg-zinc-900 text-white shadow-sm overflow-hidden p-0.5">
+                  <button
+                    onClick={() => handlePrint('single')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold hover:bg-zinc-800 transition-all active:scale-95"
+                    title="Imprime apenas a página da aba atual"
+                  >
+                    <Printer size={14} />
+                    Imprimir Aba (1 Pág)
+                  </button>
+                  <div className="h-4 w-px bg-zinc-700"></div>
+                  <button
+                    onClick={() => handlePrint('both')}
+                    className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold hover:bg-zinc-800 transition-all active:scale-95 text-amber-300"
+                    title="Imprime as 2 folhas completas (REFC + Resumo de Entradas)"
+                  >
+                    2 Págs
+                  </button>
                 </div>
-                <h4 className="text-sm font-bold text-zinc-900">Alterar Despesa / Saída</h4>
-              </div>
-              <button
-                type="button"
-                onClick={() => setEditingExpense(null)}
-                className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
-              >
-                <X size={18} />
-              </button>
-            </div>
 
-            <form onSubmit={handleSaveEditExpense} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-bold text-zinc-700 mb-1">
-                  Data da Despesa (ex: 10/07 ou DD/MM)
-                </label>
-                <input
-                  type="text"
-                  value={editDate}
-                  onChange={(e) => setEditDate(e.target.value)}
-                  placeholder="DD/MM"
-                  className="w-full rounded-xl border border-zinc-300 bg-white p-2.5 text-xs font-mono font-bold text-zinc-900 focus:border-blue-600 focus:outline-hidden"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-zinc-700 mb-1">
-                  Descrição da Despesa / Saída
-                </label>
-                <input
-                  type="text"
-                  value={editDesc}
-                  onChange={(e) => setEditDesc(e.target.value)}
-                  placeholder="Ex: TAXA DE LUZ, SUSTENTO PASTORAL..."
-                  className="w-full rounded-xl border border-zinc-300 bg-white p-2.5 text-xs font-bold uppercase text-zinc-900 focus:border-blue-600 focus:outline-hidden"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-zinc-700 mb-1">
-                  Valor da Despesa (R$)
-                </label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-zinc-400">R$</span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={editAmount}
-                    onChange={(e) => setEditAmount(e.target.value)}
-                    placeholder="0.00"
-                    className="w-full rounded-xl border border-zinc-300 bg-white py-2.5 pl-9 pr-3 text-xs font-mono font-bold text-zinc-900 focus:border-blue-600 focus:outline-hidden"
-                    required
-                  />
+                {/* Grupo de Download PDF */}
+                <div className="flex items-center rounded-xl border border-zinc-300 bg-white text-zinc-800 shadow-xs overflow-hidden p-0.5">
+                  <button
+                    onClick={() => handleDownloadPdf(activeTab)}
+                    disabled={isGeneratingPdf}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold hover:bg-zinc-100 transition-all active:scale-95 disabled:opacity-50"
+                    title="Baixar arquivo PDF da aba atual"
+                  >
+                    <Download size={14} />
+                    {isGeneratingPdf ? 'Gerando...' : 'Salvar PDF (1 Pág)'}
+                  </button>
+                  <div className="h-4 w-px bg-zinc-200"></div>
+                  <button
+                    onClick={() => handleDownloadPdf('both')}
+                    disabled={isGeneratingPdf}
+                    className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold hover:bg-zinc-100 transition-all active:scale-95 disabled:opacity-50 text-blue-700"
+                    title="Baixar arquivo PDF com as 2 páginas completas"
+                  >
+                    2 Págs
+                  </button>
                 </div>
               </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-zinc-100">
-                <button
-                  type="button"
-                  onClick={() => setEditingExpense(null)}
-                  className="rounded-xl border border-zinc-200 px-4 py-2 text-xs font-bold text-zinc-600 hover:bg-zinc-100 transition-all"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white hover:bg-blue-700 transition-all shadow-sm"
-                >
-                  <Save size={14} />
-                  Salvar Alteração
-                </button>
-              </div>
-            </form>
+            )}
           </div>
         </div>
-      )}
+      </div>
 
-      {/* PAINEL DE EDIÇÃO DOS DADOS DA IGREJA & ESTATÍSTICAS (Opcional / Recolhível) */}
-      <details className="rounded-2xl border border-zinc-200 bg-white p-4 text-xs print:hidden">
-        <summary className="font-bold text-zinc-800 cursor-pointer flex items-center justify-between">
-          <span className="flex items-center gap-2">
-            <Building2 size={16} className="text-zinc-500" />
-            Editar Dados da Igreja e Estatísticas de Membresia do Mês
-          </span>
-          <span className="text-zinc-400 hover:text-zinc-600">Clique para abrir/fechar</span>
-        </summary>
-        
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-3 border-t border-zinc-100">
-          <div>
-            <label className="block font-bold text-zinc-600 mb-1">Nome da Igreja</label>
-            <input
-              type="text"
-              value={churchInfo.churchName}
-              onChange={(e) => setChurchInfo(prev => ({ ...prev, churchName: e.target.value }))}
-              className="w-full rounded-lg border border-zinc-300 p-2 text-xs font-semibold"
-            />
-          </div>
-          <div>
-            <label className="block font-bold text-zinc-600 mb-1">Pastor Titular</label>
-            <input
-              type="text"
-              value={churchInfo.pastorName}
-              onChange={(e) => setChurchInfo(prev => ({ ...prev, pastorName: e.target.value }))}
-              className="w-full rounded-lg border border-zinc-300 p-2 text-xs font-semibold"
-            />
-          </div>
-          <div>
-            <label className="block font-bold text-zinc-600 mb-1">Endereço da Igreja</label>
-            <input
-              type="text"
-              value={churchInfo.address}
-              onChange={(e) => setChurchInfo(prev => ({ ...prev, address: e.target.value }))}
-              className="w-full rounded-lg border border-zinc-300 p-2 text-xs font-semibold"
-            />
-          </div>
-          <div>
-            <label className="block font-bold text-zinc-600 mb-1">Região Eclesiástica</label>
-            <input
-              type="text"
-              value={churchInfo.region}
-              onChange={(e) => setChurchInfo(prev => ({ ...prev, region: e.target.value }))}
-              className="w-full rounded-lg border border-zinc-300 p-2 text-xs font-semibold"
-            />
-          </div>
-        </div>
+      {activeTab === 'annual' ? (
+        <AnnualConsolidatedReport 
+          churchInfo={churchInfo}
+          initialYear={currentYear}
+          onSelectMonth={(mKey) => {
+            setSelectedMonthYear(mKey);
+            setActiveTab('refc');
+          }}
+        />
+      ) : (
+        <>
+          {/* ========================================================================= */}
+          {/* VISUALIZAÇÃO DA FOLHA A4 OFICIAL (LAYOUT DE IMPRESSÃO / PDF)              */}
+          {/* ========================================================================= */}
 
-        {/* Estatísticas */}
-        <div className="mt-4 pt-3 border-t border-zinc-100">
-          <p className="font-bold text-zinc-700 mb-2">Estatísticas do Mês</p>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
-            <div>
-              <label className="block text-zinc-500 mb-1">Nº Membros</label>
-              <input
-                type="number"
-                value={stats.membersCount}
-                onChange={(e) => setStats(prev => ({ ...prev, membersCount: parseInt(e.target.value) || 0 }))}
-                className="w-full rounded-lg border border-zinc-300 p-1.5 text-xs text-center font-bold"
-              />
-            </div>
-            <div>
-              <label className="block text-zinc-500 mb-1">Nº Células</label>
-              <input
-                type="number"
-                value={stats.cellsCount}
-                onChange={(e) => setStats(prev => ({ ...prev, cellsCount: parseInt(e.target.value) || 0 }))}
-                className="w-full rounded-lg border border-zinc-300 p-1.5 text-xs text-center font-bold"
-              />
-            </div>
-            <div>
-              <label className="block text-zinc-500 mb-1">Visitantes Mês</label>
-              <input
-                type="number"
-                value={stats.visitorsCount}
-                onChange={(e) => setStats(prev => ({ ...prev, visitorsCount: parseInt(e.target.value) || 0 }))}
-                className="w-full rounded-lg border border-zinc-300 p-1.5 text-xs text-center font-bold"
-              />
-            </div>
-            <div>
-              <label className="block text-zinc-500 mb-1">Aceitações</label>
-              <input
-                type="number"
-                value={stats.conversionsCount}
-                onChange={(e) => setStats(prev => ({ ...prev, conversionsCount: parseInt(e.target.value) || 0 }))}
-                className="w-full rounded-lg border border-zinc-300 p-1.5 text-xs text-center font-bold"
-              />
-            </div>
-            <div>
-              <label className="block text-zinc-500 mb-1">Batismos Águas</label>
-              <input
-                type="number"
-                value={stats.baptismsWaterCount}
-                onChange={(e) => setStats(prev => ({ ...prev, baptismsWaterCount: parseInt(e.target.value) || 0 }))}
-                className="w-full rounded-lg border border-zinc-300 p-1.5 text-xs text-center font-bold"
-              />
-            </div>
-            <div>
-              <label className="block text-zinc-500 mb-1">Batismos Espírito</label>
-              <input
-                type="number"
-                value={stats.baptismsHolySpiritCount}
-                onChange={(e) => setStats(prev => ({ ...prev, baptismsHolySpiritCount: parseInt(e.target.value) || 0 }))}
-                className="w-full rounded-lg border border-zinc-300 p-1.5 text-xs text-center font-bold"
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-4 flex justify-end">
-          <button
-            onClick={handleSaveChurchSettings}
-            className="flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-bold text-white hover:bg-zinc-900"
-          >
-            <Save size={14} /> Salvar como Padrão
-          </button>
-        </div>
-      </details>
-
-      {/* ========================================================================= */}
-      {/* VISUALIZAÇÃO DA FOLHA A4 OFICIAL (IDÊNTICA À PLANILHA QUADRANGULAR)        */}
-      {/* ========================================================================= */}
-
-      <div className="flex justify-center overflow-x-auto pb-8">
+      <div className="flex justify-center overflow-x-auto pb-8 print:p-0 print:m-0 print:overflow-visible">
         {/* CONTAINER DO REFC (PÁGINA 1) */}
         <div
           id="print-refc-sheet"
@@ -1453,7 +1185,7 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
           className={cn(
             "w-[210mm] min-h-[297mm] bg-white p-[10mm] text-zinc-900 font-serif border border-zinc-300 shadow-md",
             activeTab !== 'refc' && printMode === 'single' ? "hidden print:hidden" : "block",
-            printMode === 'both' ? "print:block print:break-after-page" : ""
+            printMode === 'both' ? "print:block print-page-break" : ""
           )}
           style={{ boxSizing: 'border-box' }}
         >
@@ -1468,6 +1200,7 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
                     alt="Logo Igreja" 
                     className="max-h-full max-w-full object-contain"
                     referrerPolicy="no-referrer"
+                    crossOrigin="anonymous"
                   />
                 ) : (
                   <>
@@ -1600,22 +1333,28 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
                       <div className="flex items-center justify-between">
                         <span>{exp.description}</span>
                         {/* Botões de Alterar e Excluir na visualização em tela */}
-                        <div className="hidden group-hover:flex items-center gap-1 print:hidden">
+                        <div className="hidden group-hover:flex items-center gap-1.5 print:hidden">
                           <button
                             type="button"
-                            onClick={() => handleOpenEditExpense(exp)}
-                            className="p-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200 text-[10px] font-bold flex items-center gap-0.5"
-                            title="Alterar despesa"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenEditExpense(exp, idx);
+                            }}
+                            className="px-2 py-0.5 rounded-md bg-blue-100 text-blue-700 hover:bg-blue-200 text-[11px] font-bold flex items-center gap-1 transition-all active:scale-95 shadow-xs cursor-pointer"
+                            title="Alterar valor ou descrição desta despesa"
                           >
-                            <Pencil size={10} /> Alterar
+                            <Pencil size={11} /> Alterar
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleRemoveExpense(exp.id, exp.description)}
-                            className="p-1 rounded bg-rose-100 text-rose-700 hover:bg-rose-200 text-[10px] font-bold flex items-center gap-0.5"
-                            title="Excluir despesa"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeletingExpense({ exp, index: idx });
+                            }}
+                            className="px-2 py-0.5 rounded-md bg-rose-100 text-rose-700 hover:bg-rose-200 text-[11px] font-bold flex items-center gap-1 transition-all active:scale-95 shadow-xs cursor-pointer"
+                            title="Excluir despesa da folha"
                           >
-                            <Trash2 size={10} /> Excluir
+                            <Trash2 size={11} /> Excluir
                           </button>
                         </div>
                       </div>
@@ -1755,72 +1494,28 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
 
                     {/* Dízimo */}
                     <td className="p-0.5 px-1 border-r border-black text-right font-mono">
-                      {entry.tithes > 0 ? (
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={entry.tithes || ''}
-                          onChange={(e) => handleCellChange(entry.day, 'tithes', e.target.value)}
-                          className="w-full text-right bg-transparent outline-none font-bold text-zinc-900 print:hidden"
-                        />
-                      ) : (
-                        <span className="print:inline text-zinc-300">R$ -</span>
-                      )}
-                      <span className="hidden print:inline font-bold">
+                      <span className={cn("font-bold", entry.tithes > 0 ? "text-zinc-900" : "text-zinc-300")}>
                         {entry.tithes > 0 ? fmtCurrency(entry.tithes) : 'R$ -'}
                       </span>
                     </td>
 
                     {/* Oferta Geral */}
                     <td className="p-0.5 px-1 border-r border-black text-right font-mono">
-                      {entry.offeringGeneral > 0 ? (
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={entry.offeringGeneral || ''}
-                          onChange={(e) => handleCellChange(entry.day, 'offeringGeneral', e.target.value)}
-                          className="w-full text-right bg-transparent outline-none font-bold text-zinc-900 print:hidden"
-                        />
-                      ) : (
-                        <span className="print:inline text-zinc-300">R$ -</span>
-                      )}
-                      <span className="hidden print:inline font-bold">
+                      <span className={cn("font-bold", entry.offeringGeneral > 0 ? "text-zinc-900" : "text-zinc-300")}>
                         {entry.offeringGeneral > 0 ? fmtCurrency(entry.offeringGeneral) : 'R$ -'}
                       </span>
                     </td>
 
                     {/* Oferta Especial */}
                     <td className="p-0.5 px-1 border-r border-black text-right font-mono">
-                      {entry.offeringSpecial > 0 ? (
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={entry.offeringSpecial || ''}
-                          onChange={(e) => handleCellChange(entry.day, 'offeringSpecial', e.target.value)}
-                          className="w-full text-right bg-transparent outline-none font-bold text-zinc-900 print:hidden"
-                        />
-                      ) : (
-                        <span className="print:inline text-zinc-300">R$ -</span>
-                      )}
-                      <span className="hidden print:inline font-bold">
+                      <span className={cn("font-bold", entry.offeringSpecial > 0 ? "text-zinc-900" : "text-zinc-300")}>
                         {entry.offeringSpecial > 0 ? fmtCurrency(entry.offeringSpecial) : 'R$ -'}
                       </span>
                     </td>
 
                     {/* 3º Domingo / Missões */}
                     <td className="p-0.5 px-1 border-r border-black text-right font-mono">
-                      {entry.missions > 0 ? (
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={entry.missions || ''}
-                          onChange={(e) => handleCellChange(entry.day, 'missions', e.target.value)}
-                          className="w-full text-right bg-transparent outline-none font-bold text-emerald-800 print:hidden"
-                        />
-                      ) : (
-                        <span className="print:inline text-zinc-300">R$ -</span>
-                      )}
-                      <span className="hidden print:inline font-bold text-emerald-800">
+                      <span className={cn("font-bold", entry.missions > 0 ? "text-emerald-800" : "text-zinc-300")}>
                         {entry.missions > 0 ? fmtCurrency(entry.missions) : 'R$ -'}
                       </span>
                     </td>
@@ -1893,6 +1588,135 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
           </div>
         </div>
       </div>
+      </>
+      )}
+
+      {/* MODAL DE EDIÇÃO DE DESPESA */}
+      {editingExpense && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs animate-fade-in print:hidden">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border border-zinc-200 animate-scale-up">
+            <div className="flex items-center justify-between border-b border-zinc-100 pb-3 mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100 text-blue-700">
+                  <Pencil size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-zinc-900">Alterar Despesa</h3>
+                  <p className="text-xs text-zinc-500">Modifique a data, descrição ou valor desta saída</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setEditingExpense(null); setEditingExpenseIndex(null); setEditError(null); }}
+                className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 transition-colors cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditExpense} className="space-y-4">
+              {editError && (
+                <div className="p-2.5 rounded-xl bg-rose-50 text-rose-700 text-xs font-semibold border border-rose-200 flex items-center gap-1.5">
+                  <Info size={16} />
+                  {editError}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-bold text-zinc-700 mb-1">
+                  Data do Comprovante (Dia/Mês)
+                </label>
+                <input
+                  type="text"
+                  value={editDate}
+                  onChange={(e) => setEditDate(e.target.value)}
+                  placeholder="Ex: 15/08 ou 15"
+                  className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-900 focus:border-blue-600 focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-zinc-700 mb-1">
+                  Descrição / Discriminação da Saída
+                </label>
+                <input
+                  type="text"
+                  value={editDesc}
+                  onChange={(e) => setEditDesc(e.target.value)}
+                  placeholder="Ex: ENERGIA ELÉTRICA / ÁGUA / MATERIAL DE LIMPEZA"
+                  className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-900 uppercase focus:border-blue-600 focus:outline-hidden"
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-zinc-700 mb-1">
+                  Valor da Despesa (R$)
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold text-zinc-400">R$</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={editAmount}
+                    onChange={(e) => setEditAmount(e.target.value)}
+                    placeholder="Ex: 195,70"
+                    className="w-full rounded-xl border border-zinc-300 bg-white py-2 pl-10 pr-3 text-base font-bold text-zinc-900 focus:border-blue-600 focus:outline-hidden"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-4 border-t border-zinc-100">
+                <button
+                  type="button"
+                  onClick={() => { setEditingExpense(null); setEditingExpenseIndex(null); setEditError(null); }}
+                  className="rounded-xl px-4 py-2 text-xs font-bold text-zinc-600 hover:bg-zinc-100 transition-all cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-5 py-2 text-xs font-bold text-white shadow-sm hover:bg-blue-700 transition-all active:scale-95 cursor-pointer"
+                >
+                  <CheckCircle2 size={16} />
+                  Salvar Alteração
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE CONFIRMAÇÃO DE EXCLUSÃO DE DESPESA */}
+      {deletingExpense && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs animate-fade-in print:hidden">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl border border-zinc-200 text-center animate-scale-up">
+            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-rose-100 text-rose-600">
+              <Trash2 size={24} />
+            </div>
+            <h3 className="text-base font-bold text-zinc-900 mb-1">Excluir Despesa?</h3>
+            <p className="text-xs text-zinc-600 mb-4">
+              Deseja realmente remover a despesa <strong className="text-zinc-900">"{deletingExpense.exp.description}"</strong> no valor de <strong className="text-zinc-900 font-mono">{fmtCurrency(deletingExpense.exp.amount)}</strong>?
+            </p>
+            <div className="flex items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => setDeletingExpense(null)}
+                className="rounded-xl border border-zinc-300 px-4 py-2 text-xs font-bold text-zinc-700 hover:bg-zinc-50 transition-all cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteExpense}
+                className="rounded-xl bg-rose-600 px-5 py-2 text-xs font-bold text-white shadow-sm hover:bg-rose-700 transition-all active:scale-95 cursor-pointer"
+              >
+                Sim, Excluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Regras CSS de Impressão A4 Exatas (1 Página por Aba) */}
       <style>{`

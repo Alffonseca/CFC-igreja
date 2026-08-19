@@ -195,7 +195,18 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
           setDailyEntries(data.dailyEntries);
         }
         if (data.expenses && Array.isArray(data.expenses)) {
-          setExpenses(data.expenses);
+          const sanitizedExpenses = data.expenses.map((e: any) => {
+            const desc = (e.description || '').toUpperCase();
+            let amt = typeof e.amount === 'number' ? e.amount : parseCurrencyInput(e.amount);
+            if ((desc.includes('ÁGUA') || desc.includes('AGUA')) && (amt === 1957 || amt === 1957.00)) {
+              amt = 195.70;
+            }
+            return {
+              ...e,
+              amount: Math.round(amt * 100) / 100
+            };
+          });
+          setExpenses(sanitizedExpenses);
         }
         if (data.totalGeneralTarget !== undefined) setTotalGeneralTarget(data.totalGeneralTarget);
         if (data.targetTithes !== undefined) setTargetTithes(data.targetTithes);
@@ -598,13 +609,14 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
       return;
     }
 
+    let updatedList: ExpenseEntry[] = [];
     setExpenses(prev => {
       const existingIdx = prev.findIndex((exp, idx) => 
         (editingExpense?.id && exp.id === editingExpense.id) || idx === editingExpenseIndex
       );
 
       if (existingIdx >= 0) {
-        return prev.map((exp, idx) => {
+        updatedList = prev.map((exp, idx) => {
           if (idx === existingIdx) {
             return {
               ...exp,
@@ -616,7 +628,7 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
           return exp;
         });
       } else {
-        return [
+        updatedList = [
           ...prev,
           {
             id: editingExpense?.id || Math.random().toString(36).substring(2, 9),
@@ -626,7 +638,15 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
           }
         ];
       }
+      return updatedList;
     });
+
+    if (auth.currentUser && updatedList.length > 0) {
+      setDoc(doc(db, 'refc_reports', selectedMonthYear), {
+        expenses: updatedList,
+        updatedAt: serverTimestamp()
+      }, { merge: true }).catch(err => console.warn('Erro ao salvar despesa editada no Firestore:', err));
+    }
 
     const savedDesc = editDesc.trim().toUpperCase();
     setEditingExpense(null);
@@ -639,12 +659,22 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
   const handleConfirmDeleteExpense = () => {
     if (!deletingExpense) return;
     const { exp, index } = deletingExpense;
-    setExpenses(prev => prev.filter((item, idx) => {
-      if (exp.id && item.id) {
-        return item.id !== exp.id;
-      }
-      return idx !== index;
-    }));
+    let filteredList: ExpenseEntry[] = [];
+    setExpenses(prev => {
+      filteredList = prev.filter((item, idx) => {
+        if (exp.id && item.id) {
+          return item.id !== exp.id;
+        }
+        return idx !== index;
+      });
+      return filteredList;
+    });
+    if (auth.currentUser) {
+      setDoc(doc(db, 'refc_reports', selectedMonthYear), {
+        expenses: filteredList,
+        updatedAt: serverTimestamp()
+      }, { merge: true }).catch(err => console.warn('Erro ao salvar exclusão de despesa:', err));
+    }
     const desc = exp.description || 'Despesa';
     setDeletingExpense(null);
     setSyncStatus(`"${desc}" excluída com sucesso do REFC!`);

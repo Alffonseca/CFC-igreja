@@ -136,7 +136,7 @@ export default function Transactions() {
     setEditingTransaction(t);
     setFormData({
       type: t.type,
-      amount: t.amount.toString(),
+      amount: t.amount > 0 ? t.amount.toFixed(2).replace('.', ',') : '',
       date: t.date,
       description: t.description,
       destination: t.destination || '',

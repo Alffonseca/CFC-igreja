@@ -94,7 +94,7 @@ export function parseCurrencyInput(input: string | number | undefined | null): n
       str = str.replace(/,/g, '');
     }
   } 
-  // Se contiver apenas ponto(s) (ex: 195.70 ou 1.957 ou 1.500.000)
+  // Se contiver apenas ponto(s) (ex: 195.70 ou 195.7 ou 1.500.000)
   else if (str.includes('.')) {
     const dotParts = str.split('.');
     if (dotParts.length === 2 && dotParts[1].length <= 2) {
@@ -165,9 +165,10 @@ function RefcCurrencyCell({
       onBlur={handleBlur}
       placeholder={placeholder}
       className={cn(
-        "w-24 text-right rounded border border-zinc-200 bg-white p-1 text-xs font-mono font-bold text-zinc-900 focus:border-blue-600 focus:outline-hidden",
+        "w-24 text-right rounded border border-zinc-200 bg-white p-1 text-xs font-mono font-bold text-zinc-900 focus:border-blue-600 focus:outline-hidden touch-auto sheet-scroll-input",
         className
       )}
+      style={{ touchAction: 'pan-x pan-y' }}
     />
   );
 }
@@ -212,7 +213,20 @@ export default function RefcEntryForm() {
       { name: 'SUSTENTO PASTORAL', defaultDate: '15' }
     ];
 
-    let list = Array.isArray(currExpenses) ? [...currExpenses] : [];
+    let list = Array.isArray(currExpenses) ? currExpenses.map(e => ({ ...e })) : [];
+
+    // Sanitize any incorrect legacy conversion values for Água (e.g., 1957 / 1957.00 -> 195.70)
+    list = list.map(e => {
+      const descUpper = (e.description || '').toUpperCase();
+      let amt = typeof e.amount === 'number' ? e.amount : parseCurrencyInput(e.amount);
+      if ((descUpper.includes('ÁGUA') || descUpper.includes('AGUA')) && (amt === 1957 || amt === 1957.00)) {
+        amt = 195.70;
+      }
+      return {
+        ...e,
+        amount: Math.round(amt * 100) / 100
+      };
+    });
 
     fixedDefs.forEach(f => {
       const exists = list.some(e => 
@@ -587,17 +601,33 @@ export default function RefcEntryForm() {
     });
   };
 
-  const handleExpenseAmountChange = (id: string, value: string | number) => {
-    const numVal = parseCurrencyInput(value);
-    setExpenses(prev => prev.map(exp => {
-      if (exp.id === id) {
-        return { ...exp, amount: numVal };
-      }
-      return exp;
-    }));
+  const persistExpensesToFirestore = async (newExpensesList: ExpenseEntry[]) => {
+    if (!auth.currentUser) return;
+    try {
+      await setDoc(doc(db, 'refc_reports', selectedMonthYear), {
+        expenses: newExpensesList,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (err) {
+      console.warn('Erro ao auto-salvar despesas no Firestore:', err);
+    }
   };
 
-  const handleAddExpense = (e: React.FormEvent) => {
+  const handleExpenseAmountChange = (id: string, value: string | number) => {
+    const numVal = parseCurrencyInput(value);
+    setExpenses(prev => {
+      const updated = prev.map(exp => {
+        if (exp.id === id) {
+          return { ...exp, amount: numVal };
+        }
+        return exp;
+      });
+      persistExpensesToFirestore(updated);
+      return updated;
+    });
+  };
+
+  const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
     const amountNum = parseCurrencyInput(newExpenseAmount);
     if (!newExpenseDesc.trim() || amountNum <= 0) {
@@ -617,7 +647,10 @@ export default function RefcEntryForm() {
       amount: amountNum
     };
 
-    setExpenses(prev => [...prev, newExp]);
+    const updated = [...expenses, newExp];
+    setExpenses(updated);
+    await persistExpensesToFirestore(updated);
+
     setNewExpenseDesc('');
     setNewExpenseAmount('');
     setSyncStatus(`Despesa "${newExp.description}" lançada!`);
@@ -631,7 +664,7 @@ export default function RefcEntryForm() {
     setEditAmount(exp.amount > 0 ? exp.amount.toFixed(2).replace('.', ',') : '');
   };
 
-  const handleSaveEditExpense = (e: React.FormEvent) => {
+  const handleSaveEditExpense = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingExpense) return;
     const amountNum = parseCurrencyInput(editAmount);
@@ -640,7 +673,7 @@ export default function RefcEntryForm() {
       return;
     }
 
-    setExpenses(prev => prev.map(exp => {
+    const updated = expenses.map(exp => {
       if (exp.id === editingExpense.id) {
         return {
           ...exp,
@@ -650,16 +683,21 @@ export default function RefcEntryForm() {
         };
       }
       return exp;
-    }));
+    });
+
+    setExpenses(updated);
+    await persistExpensesToFirestore(updated);
 
     setEditingExpense(null);
-    setSyncStatus(`Despesa "${editDesc.trim().toUpperCase()}" alterada com sucesso!`);
+    setSyncStatus(`Despesa "${editDesc.trim().toUpperCase()}" alterada para ${fmtCurrency(amountNum)} com sucesso!`);
     setTimeout(() => setSyncStatus(null), 3500);
   };
 
-  const handleRemoveExpense = (id: string, description?: string) => {
+  const handleRemoveExpense = async (id: string, description?: string) => {
     if (window.confirm(`Deseja realmente excluir a despesa "${description || 'selecionada'}"?`)) {
-      setExpenses(prev => prev.filter(exp => exp.id !== id));
+      const updated = expenses.filter(exp => exp.id !== id);
+      setExpenses(updated);
+      await persistExpensesToFirestore(updated);
       setSyncStatus('Despesa excluída com sucesso!');
       setTimeout(() => setSyncStatus(null), 3000);
     }
@@ -1215,7 +1253,7 @@ export default function RefcEntryForm() {
         </form>
 
         {/* Tabela de Despesas Lançadas */}
-        <div className="mt-4 overflow-x-auto border border-zinc-200 rounded-xl w-full max-w-full touch-pan-x">
+        <div className="mt-4 border border-zinc-200 rounded-xl w-full max-w-full sheet-scroll-container touch-auto">
           <table className="w-full min-w-[520px] text-xs text-left">
             <thead className="bg-zinc-50 border-b border-zinc-200 text-zinc-600 font-bold uppercase">
               <tr>
@@ -1353,7 +1391,7 @@ export default function RefcEntryForm() {
           </span>
         </div>
 
-        <div className="overflow-x-auto border border-zinc-200 rounded-xl w-full max-w-full touch-pan-x">
+        <div className="border border-zinc-200 rounded-xl w-full max-w-full sheet-scroll-container touch-auto">
           <table className="w-full min-w-[620px] text-xs text-left">
             <thead className="bg-zinc-100 border-b border-zinc-200 text-zinc-700 font-bold uppercase">
               <tr>

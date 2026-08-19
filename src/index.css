@@ -4,7 +4,7 @@
   @media print {
     @page {
       size: A4 portrait;
-      margin: 8mm 6mm;
+      margin: 0 !important;
     }
     
     html, body {
@@ -12,8 +12,8 @@
       color: #000000 !important;
       margin: 0 !important;
       padding: 0 !important;
-      width: 100% !important;
-      height: auto !important;
+      width: 210mm !important;
+      height: 100% !important;
       overflow: visible !important;
       -webkit-print-color-adjust: exact !important;
       print-color-adjust: exact !important;
@@ -26,7 +26,7 @@
     main {
       margin: 0 !important;
       padding: 0 !important;
-      width: 100% !important;
+      width: 210mm !important;
       max-width: none !important;
       overflow: visible !important;
     }
@@ -35,10 +35,15 @@
       margin: 0 auto !important;
       box-shadow: none !important;
       border: 1px solid #000000 !important;
-      width: 100% !important;
+      width: 210mm !important;
       max-width: 210mm !important;
+      min-height: 296mm !important;
+      max-height: 297mm !important;
+      padding: 6mm 8mm !important;
+      box-sizing: border-box !important;
       page-break-inside: avoid !important;
       break-inside: avoid !important;
+      overflow: hidden !important;
     }
 
     .print-page-break {

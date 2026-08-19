@@ -494,28 +494,62 @@ export default function RefcEntryForm() {
     const tuesdays = dailyEntries.filter(e => e.dayOfWeek === 2);
     const fridays = dailyEntries.filter(e => e.dayOfWeek === 5);
 
-    // Pesos exclusivamente para cultos: Domingo (0), Terça (2) e Sexta (5)
+    // Multiplicador temporal baseado na progressão real do mês:
+    // Início do mês (dias 1 a 10): ALTO (salários / início de mês)
+    // Meio do mês (dias 11 a 20): BAIXO (menor arrecadação)
+    // Fim do mês (dias 21 a 31): INTERMEDIÁRIO (entre o início e o meio, adiantamentos / fechamento)
+    const getPeriodFactor = (day: number) => {
+      if (day <= 10) {
+        return day <= 5 ? 1.85 : 1.55;
+      } else if (day <= 20) {
+        return day <= 15 ? 0.65 : 0.75;
+      } else {
+        return day <= 25 ? 1.05 : 1.22;
+      }
+    };
+
+    // Variação determinística suave para não gerar valores idênticos aos centavos entre semanas
+    const getOrganicVariance = (day: number, offset = 0) => {
+      return 1 + (((((day + offset) * 17) % 23) - 11) / 120); // Variação de ~ -9% a +9%
+    };
+
+    // Pesos para Dízimos (concentração forte no início do mês e domingos)
     const weightsDiz = dailyEntries.map(e => {
-      if (e.dayOfWeek === 0) return 3.5; // Domingos
-      if (e.dayOfWeek === 2) return 1.5; // Terças
-      if (e.dayOfWeek === 5) return 1.5; // Sextas
-      return 0;
+      if (!e.isCulto) return 0;
+      let dayBase = 1.0;
+      if (e.dayOfWeek === 0) dayBase = 3.6; // Domingo
+      else if (e.dayOfWeek === 5) dayBase = 1.3; // Sexta
+      else if (e.dayOfWeek === 2) dayBase = 0.95; // Terça
+
+      const period = getPeriodFactor(e.day);
+      const tithePeriod = period > 1 ? period * 1.2 : period * 0.88;
+      return dayBase * tithePeriod * getOrganicVariance(e.day, 0);
     });
     const distDiz = distributeTotal(tDiz, weightsDiz);
 
+    // Pesos para Oferta Geral
     const weightsOfGen = dailyEntries.map(e => {
-      if (e.dayOfWeek === 0) return 3.0; // Domingos
-      if (e.dayOfWeek === 2) return 1.5; // Terças
-      if (e.dayOfWeek === 5) return 1.5; // Sextas
-      return 0;
+      if (!e.isCulto) return 0;
+      let dayBase = 1.0;
+      if (e.dayOfWeek === 0) dayBase = 3.2; // Domingo
+      else if (e.dayOfWeek === 5) dayBase = 1.35; // Sexta
+      else if (e.dayOfWeek === 2) dayBase = 1.0; // Terça
+
+      const period = getPeriodFactor(e.day);
+      return dayBase * period * getOrganicVariance(e.day, 5);
     });
     const distOfGen = distributeTotal(tOfGen, weightsOfGen);
 
+    // Pesos para Oferta Especial
     const weightsOfEsp = dailyEntries.map(e => {
-      if (e.dayOfWeek === 0) return 2.0;
-      if (e.dayOfWeek === 2) return 1.0;
-      if (e.dayOfWeek === 5) return 1.0;
-      return 0;
+      if (!e.isCulto) return 0;
+      let dayBase = 1.0;
+      if (e.dayOfWeek === 0) dayBase = 2.6; // Domingo
+      else if (e.dayOfWeek === 5) dayBase = 1.2; // Sexta
+      else if (e.dayOfWeek === 2) dayBase = 0.85; // Terça
+
+      const period = getPeriodFactor(e.day);
+      return dayBase * period * getOrganicVariance(e.day, 11);
     });
     const distOfEsp = distributeTotal(tOfEsp, weightsOfEsp);
 
@@ -1181,8 +1215,8 @@ export default function RefcEntryForm() {
         </form>
 
         {/* Tabela de Despesas Lançadas */}
-        <div className="mt-4 overflow-x-auto border border-zinc-200 rounded-xl">
-          <table className="w-full text-xs text-left">
+        <div className="mt-4 overflow-x-auto border border-zinc-200 rounded-xl w-full max-w-full touch-pan-x">
+          <table className="w-full min-w-[520px] text-xs text-left">
             <thead className="bg-zinc-50 border-b border-zinc-200 text-zinc-600 font-bold uppercase">
               <tr>
                 <th className="p-2.5">Data</th>
@@ -1319,8 +1353,8 @@ export default function RefcEntryForm() {
           </span>
         </div>
 
-        <div className="overflow-x-auto border border-zinc-200 rounded-xl">
-          <table className="w-full text-xs text-left">
+        <div className="overflow-x-auto border border-zinc-200 rounded-xl w-full max-w-full touch-pan-x">
+          <table className="w-full min-w-[620px] text-xs text-left">
             <thead className="bg-zinc-100 border-b border-zinc-200 text-zinc-700 font-bold uppercase">
               <tr>
                 <th className="p-2 text-center w-12">Dia</th>

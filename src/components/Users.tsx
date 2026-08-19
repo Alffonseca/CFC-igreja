@@ -21,6 +21,19 @@ interface UserProfile {
 
 const INTERNAL_DOMAIN = '@gestao.igreja';
 
+export const sanitizeLoginInput = (raw: string) => {
+  if (!raw) return '';
+  let cleaned = raw.trim().toLowerCase();
+  if (cleaned.includes('@')) {
+    cleaned = cleaned.split('@')[0];
+  }
+  // Remove sufixos de domínio caso o usuário tenha digitado sem @ (ex: normascpfonsecagmail.com)
+  cleaned = cleaned.replace(/(gmail\.com|hotmail\.com|outlook\.com|yahoo\.com|icloud\.com|bol\.com\.br|uol\.com\.br)$/i, '');
+  // Remove espaços ou caracteres inválidos
+  cleaned = cleaned.replace(/[^a-z0-9._-]/g, '');
+  return cleaned;
+};
+
 export default function Users() {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -30,7 +43,6 @@ export default function Users() {
   const [currentUserProfile, setCurrentUserProfile] = useState<UserProfile | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [pendingAction, setPendingAction] = useState<{ type: 'create' | 'update', data: any } | null>(null);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -92,34 +104,19 @@ export default function Users() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setPendingAction({ type: editingUser ? 'update' : 'create', data: formData });
-    setIsModalOpen(false);
-  };
-
-  const executeAction = async () => {
-    console.log('Botão Confirmar clicado!');
-    if (!pendingAction) {
-      console.log('Nenhuma ação pendente encontrada.');
-      return;
-    }
     setSubmitting(true);
-    const { type, data } = pendingAction;
-    console.log('Executando ação:', type, 'para:', data);
+    const data = formData;
+    const type = editingUser ? 'update' : 'create';
+    console.log('Submetendo formulário de usuário:', type, 'para:', data);
     try {
       const isTargetOwner = isOwner(data.email, data.name) || (editingUser && isOwner(editingUser.email, editingUser.name));
       
-      // Generate email, and if it's not the main admin email, use the provided email/username
-      const baseEmail = data.email.includes('@') && !isOwner(data.email, data.name)
-        ? data.email.split('@')[0]
-        : data.email.includes('@')
-          ? data.email.split('@')[0]
-          : data.email;
-      
+      const cleanLogin = isTargetOwner ? data.email : sanitizeLoginInput(data.email);
       const emailToUse = isTargetOwner 
         ? (editingUser?.email || data.email)
-        : `${baseEmail}${INTERNAL_DOMAIN}`;
+        : `${cleanLogin}${INTERNAL_DOMAIN}`;
 
-      console.log('Tentando salvar usuário com e-mail/login:', emailToUse);
+      console.log('Salvando usuário com e-mail/login:', emailToUse, 'loginUsername:', cleanLogin);
 
       const isCurrentAdmin = currentUserProfile?.role === 'admin' || isOwner(auth.currentUser?.email, auth.currentUser?.displayName);
 
@@ -127,7 +124,6 @@ export default function Users() {
       if (data.role === 'admin' && !isCurrentAdmin) {
         alert('Apenas administradores podem atribuir o nível de Administrador.');
         setSubmitting(false);
-        setPendingAction(null);
         return;
       }
 
@@ -140,6 +136,7 @@ export default function Users() {
           await updateDoc(doc(db, 'users', editingUser.id), {
             name: data.name,
             email: emailToUse,
+            loginUsername: cleanLogin,
             role: roleToSave,
           });
           console.log('Documento atualizado com sucesso no Firestore.');
@@ -177,6 +174,7 @@ export default function Users() {
             }
           }
         }
+        alert('Usuário atualizado com sucesso!');
       } else {
         // Use a secondary app instance to create the user without logging out the current admin
         if (!firebaseConfig || !firebaseConfig.apiKey) {
@@ -202,6 +200,7 @@ export default function Users() {
             uid: newUser.uid,
             name: data.name,
             email: emailToUse,
+            loginUsername: cleanLogin,
             role: roleToSave,
             createdAt: serverTimestamp()
           });
@@ -211,13 +210,13 @@ export default function Users() {
           await secondarySignOut(secondaryAuth);
           await deleteApp(secondaryApp);
           
-          alert('Usuário criado com sucesso!');
+          alert(`Usuário criado com sucesso!\nLogin: ${cleanLogin}\nNível: ${roleToSave}`);
         } catch (authErr: any) {
           if (authErr.code === 'auth/email-already-in-use') {
             console.warn('E-mail já em uso na Auth:', emailToUse);
-            alert(`O e-mail "${emailToUse}" já está em uso na autenticação. Verifique se este usuário já existe ou tente um nome diferente.`);
+            alert(`O login "${cleanLogin}" já está em uso na autenticação. Verifique a lista de usuários ou escolha outro nome.`);
           } else {
-            console.error('Erro detalhado no bloco try/catch do createUserWithEmailAndPassword:', authErr);
+            console.error('Erro no createUserWithEmailAndPassword:', authErr);
           }
           
           // Clean up on error
@@ -242,12 +241,6 @@ export default function Users() {
         message = 'A senha deve ter pelo menos 6 caracteres.';
       } else if (err.code === 'auth/operation-not-allowed') {
         message = 'O método de login por e-mail/senha não está ativado no Firebase Console. Por favor, ative-o em Autenticação > Sign-in method.';
-      } else if (err.code === 'auth/invalid-api-key') {
-        message = 'Chave de API do Firebase inválida. Verifique sua configuração.';
-      } else if (err.code === 'auth/network-request-failed') {
-        message = 'Erro de rede. Verifique sua conexão com a internet.';
-      } else if (err.code === 'auth/too-many-requests') {
-        message = 'Muitas tentativas. Por favor, tente novamente mais tarde.';
       } else if (err.code === 'permission-denied') {
         message = 'Você não tem permissão para criar usuários. Certifique-se de que você inicializou seu perfil de administrador acima.';
       } else if (err.message) {
@@ -257,7 +250,6 @@ export default function Users() {
       alert(message);
     } finally {
       setSubmitting(false);
-      setPendingAction(null);
     }
   };
 
@@ -425,41 +417,6 @@ export default function Users() {
       </div>
 
       <AnimatePresence>
-        {pendingAction && (
-          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setPendingAction(null)}
-              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="relative w-full max-w-sm rounded-2xl bg-white p-8 shadow-2xl text-center"
-            >
-              <h2 className="text-xl font-bold text-zinc-900 mb-4">Confirmar {pendingAction.type === 'create' ? 'criação' : 'alteração'}?</h2>
-              <p className="text-zinc-500 mb-8">Tem certeza que deseja {pendingAction.type === 'create' ? 'criar' : 'alterar'} este usuário?</p>
-              <div className="flex gap-4">
-                <button
-                  onClick={() => setPendingAction(null)}
-                  className="flex-1 rounded-lg bg-zinc-100 py-2.5 font-semibold text-zinc-700 hover:bg-zinc-200"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={executeAction}
-                  disabled={submitting}
-                  className="flex-1 rounded-lg bg-zinc-900 py-2.5 font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
-                >
-                  {submitting ? 'Salvando...' : 'Confirmar'}
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
         {isModalOpen && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
             <motion.div
@@ -506,19 +463,19 @@ export default function Users() {
                     value={formData.email.endsWith(INTERNAL_DOMAIN) ? formData.email.replace(INTERNAL_DOMAIN, '') : formData.email}
                     onChange={(e) => {
                       const val = e.target.value;
-                      if (!val.includes('@') || isOwner(val)) {
-                        setFormData({ ...formData, email: val });
-                      } else {
-                        setFormData({ ...formData, email: val.split('@')[0] });
-                      }
+                      setFormData({ ...formData, email: val });
                     }}
                     className={cn(
-                      "w-full rounded-lg border border-zinc-200 bg-zinc-50 p-2.5 outline-none focus:ring-2 focus:ring-zinc-900/10",
+                      "w-full rounded-lg border border-zinc-200 bg-zinc-50 p-2.5 outline-none focus:ring-2 focus:ring-zinc-900/10 font-mono text-sm",
                       editingUser && isOwner(editingUser.email, editingUser.name) ? "opacity-60 cursor-not-allowed" : ""
                     )}
-                    placeholder="Ex: joaosilva"
+                    placeholder="Ex: normafonseca"
                   />
-                  <p className="text-[10px] text-zinc-400 italic">Este nome sera usado para entrar no sistema.</p>
+                  <div className="flex items-center justify-between text-[11px] text-zinc-500 mt-1">
+                    <span>
+                      Login para acesso: <strong className="text-blue-700 font-mono bg-blue-50 px-1.5 py-0.5 rounded font-bold">{sanitizeLoginInput(formData.email) || 'usuario'}</strong>
+                    </span>
+                  </div>
                 </div>
 
                 <div className="space-y-1">

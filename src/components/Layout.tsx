@@ -87,8 +87,8 @@ export default function Layout({ role, userName }: LayoutProps) {
   const isMasterAdmin = role === 'admin' || isOwner(auth.currentUser?.email, userName);
 
   const navItems = [
+    { to: '/', icon: LayoutDashboard, label: 'Principal', desc: 'Resumo e indicadores' },
     ...(isMasterAdmin || (role !== 'cell' && role !== 'membro') ? [
-      { to: '/', icon: LayoutDashboard, label: 'Principal', desc: 'Resumo e indicadores' },
       { to: '/transactions', icon: ArrowLeftRight, label: 'Lançamentos', desc: 'Dízimos, ofertas e saídas' },
     ] : []),
     ...(isMasterAdmin || role !== 'membro' ? [
@@ -228,13 +228,13 @@ export default function Layout({ role, userName }: LayoutProps) {
 
       {/* Bottom Navigation */}
       <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-zinc-200 bg-white pb-safe pt-1.5 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] lg:hidden print:hidden">
-        <div className="mx-auto flex max-w-lg items-center justify-start sm:justify-center overflow-x-auto px-2 scrollbar-hide gap-1">
+        <div className="mx-auto flex max-w-lg items-center justify-start sm:justify-center overflow-x-auto px-1 scrollbar-hide gap-0.5 touch-pan-x">
           {navItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               className={({ isActive }) => cn(
-                "flex flex-shrink-0 flex-col items-center gap-1 rounded-xl px-3 py-1.5 transition-all active:scale-90 min-w-[62px]",
+                "flex flex-shrink-0 flex-col items-center gap-0.5 rounded-xl px-2.5 py-1 transition-all active:scale-90 min-w-[58px]",
                 isActive ? "text-zinc-900 font-bold" : "text-zinc-400 hover:text-zinc-600 font-medium"
               )}
             >
@@ -244,7 +244,7 @@ export default function Layout({ role, userName }: LayoutProps) {
                     "flex h-7 w-7 items-center justify-center rounded-lg transition-colors",
                     isActive ? "bg-zinc-100" : ""
                   )}>
-                    <item.icon size={20} strokeWidth={isActive ? 2.5 : 2} />
+                    <item.icon size={19} strokeWidth={isActive ? 2.5 : 2} />
                   </div>
                   <span className="text-[9px] uppercase tracking-wider whitespace-nowrap">
                     {item.label}
@@ -257,6 +257,20 @@ export default function Layout({ role, userName }: LayoutProps) {
               )}
             </NavLink>
           ))}
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen(true)}
+            className="flex flex-shrink-0 flex-col items-center gap-0.5 rounded-xl px-2.5 py-1 text-zinc-400 hover:text-zinc-600 active:scale-90 min-w-[58px]"
+            title="Ver todos os menus"
+          >
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg">
+              <Menu size={19} strokeWidth={2} />
+            </div>
+            <span className="text-[9px] uppercase tracking-wider whitespace-nowrap font-medium">
+              Mais
+            </span>
+            <div className="h-1 w-1 rounded-full bg-transparent" />
+          </button>
         </div>
       </nav>
 

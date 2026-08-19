@@ -72,7 +72,7 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
     return searchParams.get('month') || format(new Date(), 'yyyy-MM');
   });
   const [activeTab, setActiveTab] = useState<'refc' | 'entradas' | 'expenses' | 'annual'>('refc');
-  const [printMode, setPrintMode] = useState<'single' | 'both'>('single');
+  const [printMode, setPrintMode] = useState<'refc' | 'entradas' | 'both'>('refc');
   const [isSavingToDb, setIsSavingToDb] = useState(false);
   
   // Informações da Igreja e Liderança
@@ -350,88 +350,107 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
       tMissions = parseFloat(targetMissions) || 0;
     }
 
-    // Filtrar os cultos (Terças, Sextas, Domingos)
-    const cultoDays = dailyEntries.filter(d => d.isCulto);
-    if (cultoDays.length === 0) return;
-
-    // Pesos: Domingo tem peso maior (2.0), Terça (1.0), Sexta (1.2)
-    let totalWeightTithes = 0;
-    let totalWeightOffGen = 0;
-    let totalWeightOffSpec = 0;
-
-    cultoDays.forEach(d => {
-      const weight = d.dayOfWeek === 0 ? 2.2 : (d.dayOfWeek === 5 ? 1.2 : 1.0);
-      totalWeightTithes += weight;
-      totalWeightOffGen += weight;
-      totalWeightOffSpec += weight;
-    });
-
-    let allocatedTithes = 0;
-    let allocatedOffGen = 0;
-    let allocatedOffSpec = 0;
-
-    const newEntries = dailyEntries.map(entry => {
-      if (!entry.isCulto) {
-        return {
-          ...entry,
-          tithes: 0,
-          offeringGeneral: 0,
-          offeringSpecial: 0,
-          missions: 0,
-          total: 0
-        };
+    // Multiplicador temporal baseado na progressão real do mês:
+    // Início do mês (dias 1 a 10): ALTO (salários / início de mês)
+    // Meio do mês (dias 11 a 20): BAIXO (menor arrecadação)
+    // Fim do mês (dias 21 a 31): INTERMEDIÁRIO (entre o início e o meio, adiantamentos / fechamento)
+    const getPeriodFactor = (day: number) => {
+      if (day <= 10) {
+        return day <= 5 ? 1.85 : 1.55;
+      } else if (day <= 20) {
+        return day <= 15 ? 0.65 : 0.75;
+      } else {
+        return day <= 25 ? 1.05 : 1.22;
       }
+    };
 
-      const weight = entry.dayOfWeek === 0 ? 2.2 : (entry.dayOfWeek === 5 ? 1.2 : 1.0);
-      
-      // Cálculo proporcional arredondado a 2 casas decimais
-      const rawTithe = (tTithes * weight) / totalWeightTithes;
-      const titheVal = Math.round(rawTithe * 100) / 100;
-      allocatedTithes += titheVal;
+    const getOrganicVariance = (day: number, offset = 0) => {
+      return 1 + (((((day + offset) * 17) % 23) - 11) / 120);
+    };
 
-      const rawOffGen = (tOffGen * weight) / totalWeightOffGen;
-      const offGenVal = Math.round(rawOffGen * 100) / 100;
-      allocatedOffGen += offGenVal;
+    const distributeTotal = (totalVal: number, weights: number[]): number[] => {
+      if (totalVal <= 0 || weights.length === 0) return weights.map(() => 0);
+      const sumW = weights.reduce((a, b) => a + b, 0);
+      if (sumW <= 0) return weights.map(() => 0);
 
-      const rawOffSpec = (tOffSpec * weight) / totalWeightOffSpec;
-      const offSpecVal = Math.round(rawOffSpec * 100) / 100;
-      allocatedOffSpec += offSpecVal;
+      const raw = weights.map(w => Math.floor((w / sumW) * totalVal * 100) / 100);
+      const allocatedSum = raw.reduce((a, b) => a + b, 0);
+      let remainderCents = Math.round((totalVal - allocatedSum) * 100);
 
-      // Missões vai exclusivamente no 3º Domingo do mês!
-      const missionsVal = entry.isThirdSunday ? tMissions : 0;
+      const sortedIndices = weights
+        .map((w, idx) => ({ w, idx }))
+        .sort((a, b) => b.w - a.w)
+        .map(item => item.idx);
 
-      const totalVal = titheVal + offGenVal + offSpecVal + missionsVal;
+      let i = 0;
+      while (remainderCents > 0) {
+        const targetIdx = sortedIndices[i % sortedIndices.length];
+        raw[targetIdx] = Math.round((raw[targetIdx] + 0.01) * 100) / 100;
+        remainderCents--;
+        i++;
+      }
+      return raw;
+    };
+
+    // Pesos para Dízimos
+    const weightsDiz = dailyEntries.map(e => {
+      if (!e.isCulto) return 0;
+      let dayBase = 1.0;
+      if (e.dayOfWeek === 0) dayBase = 3.6;
+      else if (e.dayOfWeek === 5) dayBase = 1.3;
+      else if (e.dayOfWeek === 2) dayBase = 0.95;
+
+      const period = getPeriodFactor(e.day);
+      const tithePeriod = period > 1 ? period * 1.2 : period * 0.88;
+      return dayBase * tithePeriod * getOrganicVariance(e.day, 0);
+    });
+    const distDiz = distributeTotal(tTithes, weightsDiz);
+
+    // Pesos para Oferta Geral
+    const weightsOfGen = dailyEntries.map(e => {
+      if (!e.isCulto) return 0;
+      let dayBase = 1.0;
+      if (e.dayOfWeek === 0) dayBase = 3.2;
+      else if (e.dayOfWeek === 5) dayBase = 1.35;
+      else if (e.dayOfWeek === 2) dayBase = 1.0;
+
+      const period = getPeriodFactor(e.day);
+      return dayBase * period * getOrganicVariance(e.day, 5);
+    });
+    const distOfGen = distributeTotal(tOffGen, weightsOfGen);
+
+    // Pesos para Oferta Especial
+    const weightsOfEsp = dailyEntries.map(e => {
+      if (!e.isCulto) return 0;
+      let dayBase = 1.0;
+      if (e.dayOfWeek === 0) dayBase = 2.6;
+      else if (e.dayOfWeek === 5) dayBase = 1.2;
+      else if (e.dayOfWeek === 2) dayBase = 0.85;
+
+      const period = getPeriodFactor(e.day);
+      return dayBase * period * getOrganicVariance(e.day, 11);
+    });
+    const distOfEsp = distributeTotal(tOffSpec, weightsOfEsp);
+
+    const newEntries = dailyEntries.map((entry, index) => {
+      const d = distDiz[index] || 0;
+      const og = distOfGen[index] || 0;
+      const oe = distOfEsp[index] || 0;
+      const m = entry.isThirdSunday ? tMissions : 0;
+      const tot = d + og + oe + m;
 
       return {
         ...entry,
-        tithes: titheVal,
-        offeringGeneral: offGenVal,
-        offeringSpecial: offSpecVal,
-        missions: missionsVal,
-        total: Math.round(totalVal * 100) / 100
+        tithes: d,
+        offeringGeneral: og,
+        offeringSpecial: oe,
+        missions: m,
+        total: Math.round(tot * 100) / 100
       };
     });
 
-    // Ajuste de centavos no último culto para bater a soma perfeitamente
-    const lastCultoIndex = newEntries.map(e => e.isCulto).lastIndexOf(true);
-    if (lastCultoIndex !== -1) {
-      const diffTithes = Math.round((tTithes - allocatedTithes) * 100) / 100;
-      const diffOffGen = Math.round((tOffGen - allocatedOffGen) * 100) / 100;
-      const diffOffSpec = Math.round((tOffSpec - allocatedOffSpec) * 100) / 100;
-
-      newEntries[lastCultoIndex].tithes = Math.round((newEntries[lastCultoIndex].tithes + diffTithes) * 100) / 100;
-      newEntries[lastCultoIndex].offeringGeneral = Math.round((newEntries[lastCultoIndex].offeringGeneral + diffOffGen) * 100) / 100;
-      newEntries[lastCultoIndex].offeringSpecial = Math.round((newEntries[lastCultoIndex].offeringSpecial + diffOffSpec) * 100) / 100;
-      newEntries[lastCultoIndex].total = Math.round((
-        newEntries[lastCultoIndex].tithes +
-        newEntries[lastCultoIndex].offeringGeneral +
-        newEntries[lastCultoIndex].offeringSpecial +
-        newEntries[lastCultoIndex].missions
-      ) * 100) / 100;
-    }
-
     setDailyEntries(newEntries);
-    setSyncStatus('Distribuição de cultos (Terça-Sexta-Domingo) concluída com sucesso!');
+    setSyncStatus('Distribuição inteligente de cultos (progressão início-meio-fim) concluída com sucesso!');
     setTimeout(() => setSyncStatus(null), 4000);
   };
 
@@ -1020,11 +1039,10 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
   };
 
   // Disparar Impressão Oficial do Navegador
-  const handlePrint = (mode: 'single' | 'both') => {
+  const handlePrint = (mode: 'refc' | 'entradas' | 'both') => {
     setPrintMode(mode);
 
     const handleAfterPrint = () => {
-      setPrintMode('single');
       window.removeEventListener('afterprint', handleAfterPrint);
     };
     window.addEventListener('afterprint', handleAfterPrint);
@@ -1115,47 +1133,51 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
                   Fazer Lançamentos
                 </a>
 
-                {/* Grupo de Impressão */}
+                {/* Grupo de Impressão (REFC / ENTRADAS / 2 PÁGS) */}
                 <div className="flex items-center rounded-xl bg-zinc-900 text-white shadow-sm overflow-hidden p-0.5">
                   <button
-                    onClick={() => handlePrint('single')}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold hover:bg-zinc-800 transition-all active:scale-95"
-                    title="Imprime apenas a página da aba atual"
+                    onClick={() => handlePrint('refc')}
+                    className={cn(
+                      "flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold hover:bg-zinc-800 transition-all active:scale-95",
+                      activeTab === 'refc' && "text-amber-300"
+                    )}
+                    title="Imprimir apenas a Folha Oficial do REFC (1 Página)"
                   >
                     <Printer size={14} />
-                    Imprimir Aba (1 Pág)
+                    Imprimir REFC
+                  </button>
+                  <div className="h-4 w-px bg-zinc-700"></div>
+                  <button
+                    onClick={() => handlePrint('entradas')}
+                    className={cn(
+                      "flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold hover:bg-zinc-800 transition-all active:scale-95",
+                      activeTab === 'entradas' && "text-amber-300"
+                    )}
+                    title="Imprimir apenas a Folha de Entradas Diárias dos Cultos (1 Página)"
+                  >
+                    <Printer size={14} />
+                    Imprimir Entradas
                   </button>
                   <div className="h-4 w-px bg-zinc-700"></div>
                   <button
                     onClick={() => handlePrint('both')}
-                    className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold hover:bg-zinc-800 transition-all active:scale-95 text-amber-300"
-                    title="Imprime as 2 folhas completas (REFC + Resumo de Entradas)"
+                    className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold hover:bg-zinc-800 transition-all active:scale-95 text-zinc-300 hover:text-white"
+                    title="Imprime as 2 folhas completas (REFC + Entradas)"
                   >
                     2 Págs
                   </button>
                 </div>
 
-                {/* Grupo de Download PDF */}
-                <div className="flex items-center rounded-xl border border-zinc-300 bg-white text-zinc-800 shadow-xs overflow-hidden p-0.5">
-                  <button
-                    onClick={() => handleDownloadPdf(activeTab)}
-                    disabled={isGeneratingPdf}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold hover:bg-zinc-100 transition-all active:scale-95 disabled:opacity-50"
-                    title="Baixar arquivo PDF da aba atual"
-                  >
-                    <Download size={14} />
-                    {isGeneratingPdf ? 'Gerando...' : 'Salvar PDF (1 Pág)'}
-                  </button>
-                  <div className="h-4 w-px bg-zinc-200"></div>
-                  <button
-                    onClick={() => handleDownloadPdf('both')}
-                    disabled={isGeneratingPdf}
-                    className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold hover:bg-zinc-100 transition-all active:scale-95 disabled:opacity-50 text-blue-700"
-                    title="Baixar arquivo PDF com as 2 páginas completas"
-                  >
-                    2 Págs
-                  </button>
-                </div>
+                {/* Botão de Salvar PDF Completo (2 Páginas Juntas) */}
+                <button
+                  onClick={() => handleDownloadPdf('both')}
+                  disabled={isGeneratingPdf}
+                  className="flex items-center gap-1.5 rounded-xl border border-zinc-300 bg-white px-3.5 py-2 text-xs font-bold text-zinc-800 hover:bg-zinc-100 transition-all active:scale-95 disabled:opacity-50 shadow-xs"
+                  title="Baixar arquivo PDF com as 2 páginas completas (REFC + Entradas)"
+                >
+                  <Download size={14} className="text-blue-600" />
+                  {isGeneratingPdf ? 'Gerando...' : 'Salvar PDF (2 Págs)'}
+                </button>
               </div>
             )}
           </div>
@@ -1177,18 +1199,23 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
           {/* VISUALIZAÇÃO DA FOLHA A4 OFICIAL (LAYOUT DE IMPRESSÃO / PDF)              */}
           {/* ========================================================================= */}
 
-      <div className="flex justify-center overflow-x-auto pb-8 print:p-0 print:m-0 print:overflow-visible">
-        {/* CONTAINER DO REFC (PÁGINA 1) */}
-        <div
-          id="print-refc-sheet"
-          ref={refcPrintRef}
-          className={cn(
-            "w-[210mm] min-h-[297mm] bg-white p-[10mm] text-zinc-900 font-serif border border-zinc-300 shadow-md",
-            activeTab !== 'refc' && printMode === 'single' ? "hidden print:hidden" : "block",
-            printMode === 'both' ? "print:block print-page-break" : ""
-          )}
-          style={{ boxSizing: 'border-box' }}
-        >
+          {/* Dica para dispositivos móveis */}
+          <div className="mb-2 flex items-center justify-between rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800 border border-amber-200 md:hidden print:hidden">
+            <span>📱 <strong>Dica no Celular:</strong> Deslize horizontalmente na folha abaixo para visualizar todos os campos.</span>
+          </div>
+
+          <div className="flex justify-start md:justify-center overflow-x-auto pb-8 print:p-0 print:m-0 print:overflow-visible w-full max-w-full touch-pan-x">
+            {/* CONTAINER DO REFC (PÁGINA 1) */}
+            <div
+              id="print-refc-sheet"
+              ref={refcPrintRef}
+              className={cn(
+                "w-[210mm] min-w-[210mm] min-h-[297mm] bg-white p-[8mm] print:p-[6mm] text-zinc-900 font-serif border border-zinc-300 shadow-md",
+                activeTab !== 'refc' ? "hidden" : "block",
+                printMode === 'refc' ? "print:block" : (printMode === 'both' ? "print:block print-page-break" : "print:hidden")
+              )}
+              style={{ boxSizing: 'border-box' }}
+            >
           {/* Cabeçalho Oficial Quadrangular */}
           <div className="text-center border-b-2 border-black pb-2 mb-3">
             <div className="flex items-center justify-between">
@@ -1390,35 +1417,19 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
                 </tr>
               </tfoot>
             </table>
-            
-            {/* Botão conveniente na visualização da folha na tela */}
-            <div className="mt-2 flex items-center justify-between print:hidden">
-              <span className="text-[11px] text-zinc-500">
-                💡 Passe o mouse sobre uma despesa para <strong className="text-blue-700">Alterar</strong> ou <strong className="text-rose-700">Excluir</strong> diretamente, ou clique ao lado:
-              </span>
-              <button
-                type="button"
-                onClick={() => setActiveTab('expenses')}
-                className="flex items-center gap-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 text-xs font-bold transition-all shadow-xs"
-              >
-                <Plus size={14} /> + Inserir / Gerenciar Despesas
-              </button>
-            </div>
           </div>
 
           {/* Assinaturas Oficiais no Rodapé */}
-          <div className="mt-8 pt-4 border-t border-zinc-400 grid grid-cols-2 gap-12 text-center text-xs font-sans">
+          <div className="mt-10 pt-2 grid grid-cols-2 gap-12 text-center text-xs font-sans">
             <div>
-              <div className="border-b border-black pb-1 mb-1">
-                <p className="font-bold uppercase text-zinc-900">{churchInfo.pastorName}</p>
-              </div>
-              <p className="text-[10px] uppercase font-bold text-zinc-600">Pastor Titular</p>
+              <div className="border-b-2 border-black mb-1.5 h-8"></div>
+              <p className="font-bold uppercase text-zinc-900 text-[11px]">{churchInfo.pastorName || 'PASTOR TITULAR'}</p>
+              <p className="text-[10px] uppercase font-bold text-zinc-600 tracking-wider">Pastor Titular</p>
             </div>
             <div>
-              <div className="border-b border-black pb-1 mb-1">
-                <p className="font-bold uppercase text-zinc-900">TESOURARIA / SECRETARIA</p>
-              </div>
-              <p className="text-[10px] uppercase font-bold text-zinc-600">Responsável Financeiro</p>
+              <div className="border-b-2 border-black mb-1.5 h-8"></div>
+              <p className="font-bold uppercase text-zinc-900 text-[11px]">TESOURARIA / SECRETARIA</p>
+              <p className="text-[10px] uppercase font-bold text-zinc-600 tracking-wider">Responsável Financeiro</p>
             </div>
           </div>
 
@@ -1432,9 +1443,9 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
           id="print-entradas-sheet"
           ref={entradasPrintRef}
           className={cn(
-            "w-[210mm] min-h-[297mm] bg-white p-[8mm] text-zinc-900 font-sans border border-zinc-300 shadow-md",
-            activeTab !== 'entradas' && printMode === 'single' ? "hidden print:hidden" : "block",
-            printMode === 'both' ? "print:block" : ""
+            "w-[210mm] min-w-[210mm] min-h-[297mm] bg-white p-[8mm] print:p-[6mm] text-zinc-900 font-sans border border-zinc-300 shadow-md",
+            activeTab !== 'entradas' ? "hidden" : "block",
+            printMode === 'entradas' ? "print:block" : (printMode === 'both' ? "print:block" : "print:hidden")
           )}
           style={{ boxSizing: 'border-box' }}
         >

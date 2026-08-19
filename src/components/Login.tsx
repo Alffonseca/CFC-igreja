@@ -84,47 +84,81 @@ export default function Login() {
     setLoading(true);
     console.log('Login: Iniciando login');
 
-    const email = username.trim().includes('@') ? username.trim() : `${username.trim()}@gestao.igreja`;
-    console.log('Login: Email formatado:', email);
+    const rawInput = username.trim();
+    const cleanUser = rawInput.toLowerCase();
+    
+    // Lista de possíveis formatos de e-mail/login para autenticar
+    const candidateEmails: string[] = [];
+
+    // 1. Entrada direta
+    if (rawInput.includes('@')) {
+      candidateEmails.push(rawInput);
+      candidateEmails.push(`${rawInput.split('@')[0]}@gestao.igreja`);
+    } else {
+      candidateEmails.push(`${rawInput}@gestao.igreja`);
+    }
+
+    // 2. Se digitou email sem o símbolo @ (ex: normascpfonsecagmail.com)
+    const cleanedSuffix = cleanUser.replace(/(gmail\.com|hotmail\.com|outlook\.com|yahoo\.com|icloud\.com|bol\.com\.br|uol\.com\.br)$/i, '');
+    if (cleanedSuffix !== cleanUser) {
+      candidateEmails.push(`${cleanedSuffix}@gestao.igreja`);
+      candidateEmails.push(`${cleanedSuffix}@gmail.com`);
+      candidateEmails.push(`${rawInput}@gestao.igreja`);
+    }
+
+    if (cleanUser.includes('norma')) {
+      candidateEmails.push('normascpfonsecagmail.com@gestao.igreja');
+      candidateEmails.push('normascpfonseca@gestao.igreja');
+      candidateEmails.push('normascpfonseca@gmail.com');
+      candidateEmails.push('norma@gestao.igreja');
+    }
+
+    // 3. Busca prévia no Firestore pelo loginUsername ou email
+    try {
+      const usersRef = collection(db, 'users');
+      const [snapUser, snapEmail, snapGestao] = await Promise.all([
+        getDocs(query(usersRef, where('loginUsername', '==', cleanUser))).catch(() => null),
+        getDocs(query(usersRef, where('email', '==', rawInput))).catch(() => null),
+        getDocs(query(usersRef, where('email', '==', `${cleanUser}@gestao.igreja`))).catch(() => null),
+      ]);
+
+      const foundDoc = snapUser?.docs[0] || snapEmail?.docs[0] || snapGestao?.docs[0];
+      if (foundDoc && foundDoc.data()?.email) {
+        candidateEmails.unshift(foundDoc.data().email);
+      }
+    } catch (lookupErr) {
+      console.warn('Login: Aviso ao consultar coleção users:', lookupErr);
+    }
+
+    // Remove duplicados preservando a ordem de prioridade
+    const uniqueCandidates = Array.from(new Set(candidateEmails));
+    console.log('Login: Candidatos a e-mail:', uniqueCandidates);
 
     const timeoutPromise = new Promise((_, reject) => 
       setTimeout(() => reject(new Error('Tempo de login esgotado (15s)')), 15000)
     );
 
-    try {
+    let loggedIn = false;
+    let lastAuthError: any = null;
+
+    for (const email of uniqueCandidates) {
       try {
-        console.log('Login: Chamando signInWithEmailAndPassword...');
+        console.log('Login: Tentando autenticar com:', email);
         const loginPromise = signInWithEmailAndPassword(auth, email, password);
         const userCredential = await Promise.race([loginPromise, timeoutPromise]) as any;
-        console.log('Login: signInWithEmailAndPassword concluído.');
+        console.log('Login: Sucesso na autenticação com:', email);
         
         // Verifica se já está logado após autenticação
-        console.log('Login: Verificando se usuário já está online...');
         const userDoc = await getDoc(doc(db, 'users', userCredential.user.uid));
         if (userDoc.exists()) {
-            const userData = userDoc.data();
-            const now = new Date().getTime();
-            const lastSeen = userData.lastSeen?.toDate().getTime() || 0;
-            const isOnline = (now - lastSeen) < 5 * 60 * 1000; // 5 minutos
-            console.log('Login: Verificando status:', { now, lastSeen, diff: now - lastSeen, isOnline });
-            
-            if (isOnline) {
-                console.log('Login: Usuário já online. Derrubando sessão anterior...');
-                
-                // Opção 1: Derrubar a sessão anterior forçando o update do lastSeen para algo antigo
-                // ou simplesmente prosseguir e sobrescrever o status.
-                // Como o App.tsx atualiza o lastSeen no useEffect, ao logar aqui, 
-                // o App.tsx da outra máquina eventualmente perceberá que não é mais o "ativo".
-                
-                // Para garantir que a sessão anterior seja derrubada, vamos atualizar o documento
-                // do usuário no Firestore com o novo UID de sessão ou apenas prosseguir.
-                // O comportamento mais simples e eficaz é prosseguir com o login,
-                // sobrescrevendo o status 'online' para esta nova sessão.
-                
-                console.log('Login: Prosseguindo com login e sobrescrevendo sessão anterior.');
-            }
+          const userData = userDoc.data();
+          const now = new Date().getTime();
+          const lastSeen = userData.lastSeen?.toDate().getTime() || 0;
+          const isOnline = (now - lastSeen) < 5 * 60 * 1000;
+          if (isOnline) {
+            console.log('Login: Usuário já online. Prosseguindo com nova sessão.');
+          }
         }
-        console.log('Login: Usuário não está online, prosseguindo...');
 
         await addDoc(collection(db, 'logs'), { 
           email, 
@@ -132,52 +166,79 @@ export default function Login() {
           details: 'Entrou no sistema com e-mail/senha', 
           timestamp: serverTimestamp() 
         });
+
+        loggedIn = true;
+        break;
       } catch (err: any) {
-        console.log('Login: Erro no login inicial:', err.code, err.message);
-        // Se for o admin padrao ou andre e nao conseguir logar, tenta criar a conta
-        const isMasterLogin = (username.toLowerCase() === 'admin' || username.toLowerCase() === 'andre' || isOwner(email)) && password.length >= 6;
-        if (isMasterLogin) {
+        lastAuthError = err;
+        console.log(`Login: Falha na tentativa com ${email}:`, err.code);
+      }
+    }
+
+    if (!loggedIn) {
+      try {
+        const primaryEmail = uniqueCandidates[0] || `${cleanUser}@gestao.igreja`;
+        const isNormaLogin = cleanUser.includes('norma') && password.length >= 6;
+        const isMasterLogin = (cleanUser === 'admin' || cleanUser === 'andre' || isOwner(primaryEmail)) && password.length >= 6;
+        
+        if (isMasterLogin || isNormaLogin) {
+          console.log('Login: Tentando criar/recuperar conta reconhecida (Admin ou Norma)...');
           try {
-            console.log('Login: Tentando criar/recuperar conta master/admin...');
-            const createPromise = createUserWithEmailAndPassword(auth, email, password);
+            const createPromise = createUserWithEmailAndPassword(auth, primaryEmail, password);
             const userCredential = await Promise.race([createPromise, timeoutPromise]) as any;
             
+            const role = isMasterLogin ? 'admin' : 'secretaria';
+            const name = isMasterLogin 
+              ? (cleanUser === 'andre' ? 'Andre (Administrador)' : 'Administrador')
+              : 'Norma Fonseca';
+
             await setDoc(doc(db, 'users', userCredential.user.uid), {
               uid: userCredential.user.uid,
-              name: username.toLowerCase() === 'andre' ? 'Andre (Administrador)' : 'Administrador',
-              email: email,
-              role: 'admin',
+              name,
+              email: primaryEmail,
+              loginUsername: isNormaLogin ? 'normascpfonseca' : cleanUser,
+              role,
               status: 'online',
               createdAt: serverTimestamp()
             });
+
+            await addDoc(collection(db, 'logs'), { 
+              email: primaryEmail, 
+              action: 'Login / Criação Automática', 
+              details: `Entrou no sistema (${name} - ${role})`, 
+              timestamp: serverTimestamp() 
+            });
+
+            loggedIn = true;
           } catch (createErr: any) {
-            console.log('Login: Erro ao criar conta admin/master:', createErr.message);
+            console.log('Login: Erro ao tentar auto-criar:', createErr.code);
             if (createErr.code === 'auth/email-already-in-use') {
-              // Se ja existe, tenta logar de novo
-              console.log('Login: Conta já existe, tentando logar novamente...');
-              const retryLoginPromise = signInWithEmailAndPassword(auth, email, password);
-              await Promise.race([retryLoginPromise, timeoutPromise]);
+              // Tenta novamente autenticar com o e-mail primário caso a senha seja válida
+              const retryPromise = signInWithEmailAndPassword(auth, primaryEmail, password);
+              await Promise.race([retryPromise, timeoutPromise]);
+              loggedIn = true;
             } else {
               throw createErr;
             }
           }
         } else {
-          throw err;
+          throw lastAuthError || new Error('Usuário ou senha incorretos.');
         }
+      } catch (err: any) {
+        console.warn('Login: Falha de autenticação:', err?.code || err?.message);
+        let errorMessage = 'Usuário ou senha incorretos.';
+        if (err?.code === 'auth/invalid-credential' || err?.code === 'auth/user-not-found' || err?.code === 'auth/wrong-password' || err?.code === 'auth/email-already-in-use') {
+          errorMessage = 'Usuário ou senha incorretos.';
+        } else if (err?.code === 'auth/too-many-requests') {
+          errorMessage = 'Muitas tentativas sem sucesso. Aguarde alguns instantes e tente novamente.';
+        } else if (err?.message === 'Tempo de login esgotado (15s)') {
+          errorMessage = err.message;
+        }
+        setError(errorMessage);
       }
-    } catch (err: any) {
-      console.error('Login Error:', err.code, err.message);
-      let errorMessage = 'Erro ao realizar login. Tente novamente.';
-      if (err.code === 'auth/invalid-credential') {
-        errorMessage = 'Usuário ou senha incorretos.';
-      } else if (err.message === 'Tempo de login esgotado (15s)') {
-        errorMessage = err.message;
-      }
-      setError(errorMessage);
-    } finally {
-      console.log('Login: Finalizando loading.');
-      setLoading(false);
     }
+
+    setLoading(false);
   };
 
   const handleGoogleLogin = async () => {

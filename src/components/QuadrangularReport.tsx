@@ -21,7 +21,12 @@ import {
   Pencil,
   X,
   Database,
-  RefreshCw
+  RefreshCw,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
+  Move,
+  Smartphone
 } from 'lucide-react';
 import { format, parseISO, getDaysInMonth, startOfMonth, getDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -129,6 +134,61 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
   const refcPrintRef = useRef<HTMLDivElement>(null);
   const entradasPrintRef = useRef<HTMLDivElement>(null);
   const bothPrintRef = useRef<HTMLDivElement>(null);
+
+  // Estados para Gestos e Zoom Responsivo Mobile (Android / iOS)
+  const [mobileZoomMode, setMobileZoomMode] = useState<'fit' | '100' | 'custom'>('fit');
+  const [customZoomScale, setCustomZoomScale] = useState<number>(1);
+  const [screenWidth, setScreenWidth] = useState<number>(typeof window !== 'undefined' ? window.innerWidth : 1024);
+  const sheetScrollWrapperRef = useRef<HTMLDivElement>(null);
+  const touchStateRef = useRef<{ startX: number; startY: number; scrollLeft: number; startScrollY: number } | null>(null);
+
+  useEffect(() => {
+    const handleWinResize = () => {
+      setScreenWidth(window.innerWidth);
+    };
+    window.addEventListener('resize', handleWinResize);
+    return () => window.removeEventListener('resize', handleWinResize);
+  }, []);
+
+  const isSmallScreen = screenWidth < 840;
+  // A4 largura padrão 794px. Calcula fator para caber 100% na largura da tela mobile
+  const calculatedFitScale = Math.min(1, Math.max(0.32, (screenWidth - 28) / 794));
+  const currentSheetScale = isSmallScreen
+    ? (mobileZoomMode === 'fit' ? calculatedFitScale : (mobileZoomMode === '100' ? 1.0 : customZoomScale))
+    : 1.0;
+
+  // Manipulador de toque 2D para permitir arrastar a folha livremente em qualquer direção
+  const handleSheetTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length === 1 && sheetScrollWrapperRef.current) {
+      touchStateRef.current = {
+        startX: e.touches[0].clientX,
+        startY: e.touches[0].clientY,
+        scrollLeft: sheetScrollWrapperRef.current.scrollLeft,
+        startScrollY: window.scrollY
+      };
+    }
+  };
+
+  const handleSheetTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (touchStateRef.current && e.touches.length === 1 && sheetScrollWrapperRef.current) {
+      const deltaX = touchStateRef.current.startX - e.touches[0].clientX;
+      const deltaY = touchStateRef.current.startY - e.touches[0].clientY;
+
+      // Se a folha estiver maior que a tela (escala 100% ou zoom manual), move horizontalmente
+      if (currentSheetScale > calculatedFitScale) {
+        sheetScrollWrapperRef.current.scrollLeft = touchStateRef.current.scrollLeft + deltaX;
+      }
+      // Permite rolagem vertical suave com o dedo
+      window.scrollTo({
+        top: touchStateRef.current.startScrollY + deltaY,
+        behavior: 'auto'
+      });
+    }
+  };
+
+  const handleSheetTouchEnd = () => {
+    touchStateRef.current = null;
+  };
 
   // Sugestões comuns de despesas da igreja
   const commonExpenseSuggestions = [
@@ -972,7 +1032,7 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
     XLSX.writeFile(wb, `RELATORIO_QUADRANGULAR_${monthNameUpper}_${currentYear}.xlsx`);
   };
 
-  // Utilitário confiável para captura de folha A4 com html2canvas mesmo quando a aba está oculta
+  // Utilitário confiável para captura de folha A4 com html2canvas mesmo quando a aba está oculta ou com zoom no celular
   const captureSheet = async (elementId: string): Promise<HTMLCanvasElement | null> => {
     const elem = document.getElementById(elementId);
     if (!elem) {
@@ -980,25 +1040,24 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
       return null;
     }
 
-    const isHidden = elem.classList.contains('hidden') || elem.style.display === 'none' || window.getComputedStyle(elem).display === 'none';
     let clone: HTMLElement | null = null;
     let targetElem = elem;
 
-    if (isHidden) {
-      clone = elem.cloneNode(true) as HTMLElement;
-      clone.id = `${elementId}-temp-clone`;
-      clone.classList.remove('hidden', 'print:hidden');
-      clone.style.display = 'block';
-      clone.style.visibility = 'visible';
-      clone.style.position = 'fixed';
-      clone.style.left = '-9999px';
-      clone.style.top = '0';
-      clone.style.width = '794px'; // 210mm em 96 DPI
-      clone.style.minHeight = '1123px'; // 297mm em 96 DPI
-      clone.style.zIndex = '-9999';
-      document.body.appendChild(clone);
-      targetElem = clone;
-    }
+    // Sempre clona para garantir captura estrita de 794px x 1123px sem transformações de zoom mobile
+    clone = elem.cloneNode(true) as HTMLElement;
+    clone.id = `${elementId}-temp-clone`;
+    clone.classList.remove('hidden', 'print:hidden');
+    clone.style.display = 'block';
+    clone.style.visibility = 'visible';
+    clone.style.position = 'fixed';
+    clone.style.left = '-9999px';
+    clone.style.top = '0';
+    clone.style.width = '794px'; // 210mm em 96 DPI
+    clone.style.minHeight = '1123px'; // 297mm em 96 DPI
+    clone.style.transform = 'none';
+    clone.style.zIndex = '-9999';
+    document.body.appendChild(clone);
+    targetElem = clone;
 
     try {
       await new Promise(resolve => setTimeout(resolve, 80));
@@ -1229,23 +1288,111 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
           {/* VISUALIZAÇÃO DA FOLHA A4 OFICIAL (LAYOUT DE IMPRESSÃO / PDF)              */}
           {/* ========================================================================= */}
 
-          {/* Dica para dispositivos móveis */}
-          <div className="mb-2 flex items-center justify-between rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800 border border-amber-200 md:hidden print:hidden">
-            <span>📱 <strong>Dica no Celular:</strong> Arraste livremente para cima, para baixo e para os lados para visualizar a folha completa.</span>
+          {/* Barra de Controle de Visualização e Gestos no Celular */}
+          <div className="mb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 rounded-2xl bg-white p-3 sm:p-4 border border-zinc-200 shadow-xs md:hidden print:hidden">
+            <div className="flex items-center gap-2">
+              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-100 text-blue-700 flex-shrink-0">
+                <Smartphone size={18} />
+              </span>
+              <div>
+                <p className="text-xs font-bold text-zinc-900 leading-tight">Visualização no Celular</p>
+                <p className="text-[11px] text-zinc-500">
+                  {mobileZoomMode === 'fit' 
+                    ? '✨ Modo Ajustado à Tela: role verticalmente com o dedo livremente' 
+                    : `🔍 Zoom ${Math.round(currentSheetScale * 100)}%: arraste em qualquer direção (2D)`}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5 pt-1 sm:pt-0 border-t sm:border-t-0 border-zinc-100">
+              <button
+                type="button"
+                onClick={() => setMobileZoomMode('fit')}
+                className={cn(
+                  "flex items-center gap-1 rounded-xl px-3 py-1.5 text-xs font-bold transition-all active:scale-95",
+                  mobileZoomMode === 'fit' ? "bg-blue-600 text-white shadow-xs" : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
+                )}
+                title="Ajusta a folha inteira para caber na largura da tela sem cortes"
+              >
+                <Maximize2 size={13} />
+                Ajustar à Tela
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setMobileZoomMode('100')}
+                className={cn(
+                  "flex items-center gap-1 rounded-xl px-3 py-1.5 text-xs font-bold transition-all active:scale-95",
+                  mobileZoomMode === '100' ? "bg-blue-600 text-white shadow-xs" : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
+                )}
+                title="Tamanho real A4 (100%) para leitura ampliada com arraste 2D"
+              >
+                <Move size={13} />
+                100%
+              </button>
+
+              <div className="flex items-center rounded-xl border border-zinc-200 bg-zinc-50 p-0.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileZoomMode('custom');
+                    setCustomZoomScale(prev => Math.max(0.3, Number((prev - 0.15).toFixed(2))));
+                  }}
+                  className="p-1.5 text-zinc-600 hover:text-zinc-900 active:scale-95"
+                  title="Diminuir Zoom"
+                >
+                  <ZoomOut size={14} />
+                </button>
+                <span className="px-1.5 text-[11px] font-mono font-bold text-zinc-800 min-w-[40px] text-center">
+                  {Math.round(currentSheetScale * 100)}%
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileZoomMode('custom');
+                    setCustomZoomScale(prev => Math.min(1.6, Number((prev + 0.15).toFixed(2))));
+                  }}
+                  className="p-1.5 text-zinc-600 hover:text-zinc-900 active:scale-95"
+                  title="Aumentar Zoom"
+                >
+                  <ZoomIn size={14} />
+                </button>
+              </div>
+            </div>
           </div>
 
-          <div className="flex justify-start md:justify-center overflow-x-auto pb-12 print:p-0 print:m-0 print:overflow-visible w-full max-w-full sheet-scroll-container touch-auto">
-            {/* CONTAINER DO REFC (PÁGINA 1) */}
+          <div 
+            ref={sheetScrollWrapperRef}
+            onTouchStart={handleSheetTouchStart}
+            onTouchMove={handleSheetTouchMove}
+            onTouchEnd={handleSheetTouchEnd}
+            className="flex justify-start md:justify-center overflow-x-auto pb-12 print:p-0 print:m-0 print:overflow-visible w-full max-w-full sheet-scroll-container touch-auto"
+          >
+            {/* Wrapper de escala responsiva para visualização mobile sem distorção */}
             <div
-              id="print-refc-sheet"
-              ref={refcPrintRef}
-              className={cn(
-                "w-[210mm] min-w-[210mm] min-h-[297mm] bg-white p-[8mm] print:p-[6mm] text-zinc-900 font-serif border border-zinc-300 shadow-md",
-                activeTab !== 'refc' ? "hidden" : "block",
-                printMode === 'refc' ? "print:block" : (printMode === 'both' ? "print:block print-page-break" : "print:hidden")
-              )}
-              style={{ boxSizing: 'border-box' }}
+              style={{
+                width: currentSheetScale === 1 ? 'auto' : `${Math.round(794 * currentSheetScale)}px`,
+                minHeight: currentSheetScale === 1 ? 'auto' : `${Math.round(1123 * currentSheetScale)}px`,
+                transition: 'width 0.2s ease, min-height 0.2s ease',
+                flexShrink: 0
+              }}
+              className="print:w-auto print:min-h-0 print:m-0"
             >
+              {/* CONTAINER DO REFC (PÁGINA 1) */}
+              <div
+                id="print-refc-sheet"
+                ref={refcPrintRef}
+                className={cn(
+                  "w-[210mm] min-w-[210mm] min-h-[297mm] bg-white p-[8mm] print:p-[6mm] text-zinc-900 font-serif border border-zinc-300 shadow-md",
+                  activeTab !== 'refc' ? "hidden" : "block",
+                  printMode === 'refc' ? "print:block" : (printMode === 'both' ? "print:block print-page-break" : "print:hidden")
+                )}
+                style={{
+                  boxSizing: 'border-box',
+                  transform: currentSheetScale !== 1 ? `scale(${currentSheetScale})` : undefined,
+                  transformOrigin: 'top left'
+                }}
+              >
           {/* Cabeçalho Oficial Quadrangular */}
           <div className="text-center border-b-2 border-black pb-2 mb-3">
             <div className="flex items-center justify-between">
@@ -1477,7 +1624,11 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
             activeTab !== 'entradas' ? "hidden" : "block",
             printMode === 'entradas' ? "print:block" : (printMode === 'both' ? "print:block" : "print:hidden")
           )}
-          style={{ boxSizing: 'border-box' }}
+          style={{
+            boxSizing: 'border-box',
+            transform: currentSheetScale !== 1 ? `scale(${currentSheetScale})` : undefined,
+            transformOrigin: 'top left'
+          }}
         >
           {/* Cabeçalho do Resumo Financeiro */}
           <div className="border-b-2 border-black pb-1.5 mb-2">
@@ -1627,6 +1778,7 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
               </div>
             </div>
           </div>
+        </div>
         </div>
       </div>
       </>

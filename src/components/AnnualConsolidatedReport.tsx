@@ -12,7 +12,12 @@ import {
   Building2, 
   ChevronRight, 
   RefreshCw,
-  FileText
+  FileText,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
+  Move,
+  Smartphone
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import * as XLSX from 'xlsx';
@@ -66,6 +71,57 @@ export default function AnnualConsolidatedReport({
   const [loading, setLoading] = useState(true);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const printAnnualRef = useRef<HTMLDivElement>(null);
+
+  // Estados para Gestos e Zoom Responsivo Mobile (Android / iOS)
+  const [mobileZoomMode, setMobileZoomMode] = useState<'fit' | '100' | 'custom'>('fit');
+  const [customZoomScale, setCustomZoomScale] = useState<number>(1);
+  const [screenWidth, setScreenWidth] = useState<number>(typeof window !== 'undefined' ? window.innerWidth : 1024);
+  const sheetScrollWrapperRef = useRef<HTMLDivElement>(null);
+  const touchStateRef = useRef<{ startX: number; startY: number; scrollLeft: number; startScrollY: number } | null>(null);
+
+  useEffect(() => {
+    const handleWinResize = () => {
+      setScreenWidth(window.innerWidth);
+    };
+    window.addEventListener('resize', handleWinResize);
+    return () => window.removeEventListener('resize', handleWinResize);
+  }, []);
+
+  const isSmallScreen = screenWidth < 840;
+  const calculatedFitScale = Math.min(1, Math.max(0.32, (screenWidth - 28) / 794));
+  const currentSheetScale = isSmallScreen
+    ? (mobileZoomMode === 'fit' ? calculatedFitScale : (mobileZoomMode === '100' ? 1.0 : customZoomScale))
+    : 1.0;
+
+  const handleSheetTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length === 1 && sheetScrollWrapperRef.current) {
+      touchStateRef.current = {
+        startX: e.touches[0].clientX,
+        startY: e.touches[0].clientY,
+        scrollLeft: sheetScrollWrapperRef.current.scrollLeft,
+        startScrollY: window.scrollY
+      };
+    }
+  };
+
+  const handleSheetTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (touchStateRef.current && e.touches.length === 1 && sheetScrollWrapperRef.current) {
+      const deltaX = touchStateRef.current.startX - e.touches[0].clientX;
+      const deltaY = touchStateRef.current.startY - e.touches[0].clientY;
+
+      if (currentSheetScale > calculatedFitScale) {
+        sheetScrollWrapperRef.current.scrollLeft = touchStateRef.current.scrollLeft + deltaX;
+      }
+      window.scrollTo({
+        top: touchStateRef.current.startScrollY + deltaY,
+        behavior: 'auto'
+      });
+    }
+  };
+
+  const handleSheetTouchEnd = () => {
+    touchStateRef.current = null;
+  };
 
   // Carrega e consolida os dados de todos os 12 meses
   useEffect(() => {
@@ -222,14 +278,30 @@ export default function AnnualConsolidatedReport({
   // Baixar PDF Oficial do Consolidado Anual
   const handleDownloadPdfAnnual = async () => {
     setIsGeneratingPdf(true);
+    let clone: HTMLElement | null = null;
     try {
       const elem = document.getElementById('print-annual-sheet');
       if (elem) {
-        const canvas = await html2canvas(elem, {
+        // Clona para garantir captura perfeita de 794px sem interferência do zoom mobile
+        clone = elem.cloneNode(true) as HTMLElement;
+        clone.id = 'print-annual-sheet-clone';
+        clone.style.display = 'block';
+        clone.style.visibility = 'visible';
+        clone.style.position = 'fixed';
+        clone.style.left = '-9999px';
+        clone.style.top = '0';
+        clone.style.width = '794px';
+        clone.style.minHeight = '1123px';
+        clone.style.transform = 'none';
+        clone.style.zIndex = '-9999';
+        document.body.appendChild(clone);
+
+        const canvas = await html2canvas(clone, {
           scale: 2,
           useCORS: true,
           logging: false,
-          backgroundColor: '#ffffff'
+          backgroundColor: '#ffffff',
+          windowWidth: 1000
         });
         const imgData = canvas.toDataURL('image/png');
         const pdf = new jsPDF('p', 'mm', 'a4');
@@ -240,6 +312,9 @@ export default function AnnualConsolidatedReport({
       console.error('Erro ao gerar PDF anual:', err);
       alert('Erro ao gerar PDF. Você também pode clicar em "Imprimir Consolidado".');
     } finally {
+      if (clone && clone.parentNode) {
+        clone.parentNode.removeChild(clone);
+      }
       setIsGeneratingPdf(false);
     }
   };
@@ -530,13 +605,105 @@ export default function AnnualConsolidatedReport({
       {/* ========================================================= */}
       {/* 📄 FOLHA DE IMPRESSÃO OFICIAL A4 DO CONSOLIDADO ANUAL     */}
       {/* ========================================================= */}
-      <div className="w-full max-w-full overflow-x-auto pb-10 sheet-scroll-container touch-auto">
-        <div 
-          id="print-annual-sheet"
-          ref={printAnnualRef}
-          className="mx-auto w-[210mm] min-h-[297mm] bg-white text-black p-6 shadow-sm border border-zinc-300 flex flex-col justify-between font-sans print:border-none print:shadow-none print:m-0 print:p-0"
-          style={{ boxSizing: 'border-box' }}
+      {/* Barra de Controle de Visualização e Gestos no Celular */}
+      <div className="mb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 rounded-2xl bg-white p-3 sm:p-4 border border-zinc-200 shadow-xs md:hidden print:hidden">
+        <div className="flex items-center gap-2">
+          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-100 text-blue-700 flex-shrink-0">
+            <Smartphone size={18} />
+          </span>
+          <div>
+            <p className="text-xs font-bold text-zinc-900 leading-tight">Visualização do Consolidado</p>
+            <p className="text-[11px] text-zinc-500">
+              {mobileZoomMode === 'fit' 
+                ? '✨ Modo Ajustado: role verticalmente com o dedo' 
+                : `🔍 Zoom ${Math.round(currentSheetScale * 100)}%: arraste em qualquer direção (2D)`}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5 pt-1 sm:pt-0 border-t sm:border-t-0 border-zinc-100">
+          <button
+            type="button"
+            onClick={() => setMobileZoomMode('fit')}
+            className={cn(
+              "flex items-center gap-1 rounded-xl px-3 py-1.5 text-xs font-bold transition-all active:scale-95",
+              mobileZoomMode === 'fit' ? "bg-blue-600 text-white shadow-xs" : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
+            )}
+            title="Ajusta a folha inteira para caber na largura da tela sem cortes"
+          >
+            <Maximize2 size={13} />
+            Ajustar à Tela
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setMobileZoomMode('100')}
+            className={cn(
+              "flex items-center gap-1 rounded-xl px-3 py-1.5 text-xs font-bold transition-all active:scale-95",
+              mobileZoomMode === '100' ? "bg-blue-600 text-white shadow-xs" : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
+            )}
+            title="Tamanho real A4 (100%) para leitura ampliada"
+          >
+            <Move size={13} />
+            100%
+          </button>
+
+          <div className="flex items-center rounded-xl border border-zinc-200 bg-zinc-50 p-0.5">
+            <button
+              type="button"
+              onClick={() => {
+                setMobileZoomMode('custom');
+                setCustomZoomScale(prev => Math.max(0.3, Number((prev - 0.15).toFixed(2))));
+              }}
+              className="p-1.5 text-zinc-600 hover:text-zinc-900 active:scale-95"
+              title="Diminuir Zoom"
+            >
+              <ZoomOut size={14} />
+            </button>
+            <span className="px-1.5 text-[11px] font-mono font-bold text-zinc-800 min-w-[40px] text-center">
+              {Math.round(currentSheetScale * 100)}%
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setMobileZoomMode('custom');
+                setCustomZoomScale(prev => Math.min(1.6, Number((prev + 0.15).toFixed(2))));
+              }}
+              className="p-1.5 text-zinc-600 hover:text-zinc-900 active:scale-95"
+              title="Aumentar Zoom"
+            >
+              <ZoomIn size={14} />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div 
+        ref={sheetScrollWrapperRef}
+        onTouchStart={handleSheetTouchStart}
+        onTouchMove={handleSheetTouchMove}
+        onTouchEnd={handleSheetTouchEnd}
+        className="w-full max-w-full overflow-x-auto pb-10 sheet-scroll-container touch-auto flex justify-start md:justify-center"
+      >
+        <div
+          style={{
+            width: currentSheetScale === 1 ? 'auto' : `${Math.round(794 * currentSheetScale)}px`,
+            minHeight: currentSheetScale === 1 ? 'auto' : `${Math.round(1123 * currentSheetScale)}px`,
+            transition: 'width 0.2s ease, min-height 0.2s ease',
+            flexShrink: 0
+          }}
+          className="print:w-auto print:min-h-0 print:m-0"
         >
+          <div 
+            id="print-annual-sheet"
+            ref={printAnnualRef}
+            className="mx-auto w-[210mm] min-w-[210mm] min-h-[297mm] bg-white text-black p-6 shadow-sm border border-zinc-300 flex flex-col justify-between font-sans print:border-none print:shadow-none print:m-0 print:p-0"
+            style={{
+              boxSizing: 'border-box',
+              transform: currentSheetScale !== 1 ? `scale(${currentSheetScale})` : undefined,
+              transformOrigin: 'top left'
+            }}
+          >
           <div>
             {/* Cabeçalho Oficial IEQ */}
             <div className="border-b-2 border-black pb-2 mb-3">
@@ -693,6 +860,7 @@ export default function AnnualConsolidatedReport({
               Demonstrativo Consolidado Anual Oficial • Igreja do Evangelho Quadrangular • Gerado pelo Sistema de Gestão
             </div>
           </div>
+        </div>
         </div>
       </div>
     </div>

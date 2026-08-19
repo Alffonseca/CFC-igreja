@@ -64,5 +64,12 @@
   .pb-safe {
     padding-bottom: env(safe-area-inset-bottom);
   }
+  .sheet-scroll-container {
+    overflow-x: auto;
+    overflow-y: visible;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x pan-y;
+    overscroll-behavior-x: contain;
+  }
 }
 

@@ -1053,7 +1053,7 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
   };
 
   return (
-    <div className="space-y-6 w-full max-w-full overflow-hidden">
+    <div className="space-y-6 w-full max-w-full">
       {/* Barra Superior de Controle */}
       <div className="flex flex-col gap-4 rounded-2xl bg-white p-4 sm:p-5 border border-zinc-200 shadow-sm print:hidden w-full max-w-full">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
@@ -1201,10 +1201,10 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
 
           {/* Dica para dispositivos móveis */}
           <div className="mb-2 flex items-center justify-between rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800 border border-amber-200 md:hidden print:hidden">
-            <span>📱 <strong>Dica no Celular:</strong> Deslize horizontalmente na folha abaixo para visualizar todos os campos.</span>
+            <span>📱 <strong>Dica no Celular:</strong> Arraste livremente para cima, para baixo e para os lados para visualizar a folha completa.</span>
           </div>
 
-          <div className="flex justify-start md:justify-center overflow-x-auto pb-8 print:p-0 print:m-0 print:overflow-visible w-full max-w-full touch-pan-x">
+          <div className="flex justify-start md:justify-center overflow-x-auto pb-12 print:p-0 print:m-0 print:overflow-visible w-full max-w-full sheet-scroll-container touch-auto">
             {/* CONTAINER DO REFC (PÁGINA 1) */}
             <div
               id="print-refc-sheet"

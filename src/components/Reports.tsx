@@ -145,13 +145,18 @@ export default function Reports({ role }: ReportsProps) {
   }).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
   const totals = filteredTransactions.reduce((acc, t) => {
-    if (t.type === 'tithe') acc.tithes += t.amount;
-    if (t.type === 'offering') acc.offerings += t.amount;
-    if (t.type === 'expense') acc.expenses += t.amount;
+    const amt = typeof t.amount === 'number' ? t.amount : (parseFloat(String(t.amount)) || 0);
+    if (t.type === 'tithe') acc.tithes += amt;
+    if (t.type === 'offering') acc.offerings += amt;
+    if (t.type === 'expense') acc.expenses += amt;
     return acc;
   }, { tithes: 0, offerings: 0, expenses: 0 });
 
-  const balance = totals.tithes + totals.offerings - totals.expenses;
+  totals.tithes = Math.round(totals.tithes * 100) / 100;
+  totals.offerings = Math.round(totals.offerings * 100) / 100;
+  totals.expenses = Math.round(totals.expenses * 100) / 100;
+
+  const balance = Math.round((totals.tithes + totals.offerings - totals.expenses) * 100) / 100;
 
   const handlePrint = () => {
     window.print();

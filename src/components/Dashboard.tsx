@@ -48,13 +48,18 @@ export default function Dashboard() {
   });
 
   const totals = monthTransactions.reduce((acc, t) => {
-    if (t.type === 'tithe') acc.tithes += t.amount;
-    if (t.type === 'offering') acc.offerings += t.amount;
-    if (t.type === 'expense') acc.expenses += t.amount;
+    const amt = typeof t.amount === 'number' ? t.amount : (parseFloat(String(t.amount)) || 0);
+    if (t.type === 'tithe') acc.tithes += amt;
+    if (t.type === 'offering') acc.offerings += amt;
+    if (t.type === 'expense') acc.expenses += amt;
     return acc;
   }, { tithes: 0, offerings: 0, expenses: 0 });
 
-  const balance = totals.tithes + totals.offerings - totals.expenses;
+  totals.tithes = Math.round(totals.tithes * 100) / 100;
+  totals.offerings = Math.round(totals.offerings * 100) / 100;
+  totals.expenses = Math.round(totals.expenses * 100) / 100;
+
+  const balance = Math.round((totals.tithes + totals.offerings - totals.expenses) * 100) / 100;
 
   const stats = [
     { label: 'Dizimos', value: totals.tithes, icon: TrendingUp, color: 'text-emerald-600', bg: 'bg-emerald-50' },
@@ -64,10 +69,21 @@ export default function Dashboard() {
   ];
 
   const chartData = [
-    { name: 'Dizimos', value: totals.tithes, color: '#10b981' },
+    { name: 'Dízimos', value: totals.tithes, color: '#10b981' },
     { name: 'Ofertas', value: totals.offerings, color: '#3b82f6' },
     { name: 'Despesas', value: totals.expenses, color: '#f43f5e' },
-  ];
+  ].filter(item => item.value > 0);
+
+  const formatCurrency = (val: number) => {
+    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val || 0);
+  };
+
+  const renderPieLabel = ({ value, percent }: any) => {
+    if (!value || value <= 0) return '';
+    const formatted = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 2 }).format(value);
+    const pct = Math.round((percent || 0) * 100);
+    return `${formatted} (${pct}%)`;
+  };
 
   if (loading) return <div>Carregando...</div>;
 
@@ -143,23 +159,43 @@ export default function Dashboard() {
               <button onClick={() => setChartType('bar')} className={cn("px-3 py-1 rounded-md text-sm font-semibold transition-all", chartType === 'bar' ? "bg-white shadow-sm text-zinc-900" : "text-zinc-500")}>Barra</button>
             </div>
           </div>
-          <ResponsiveContainer width="100%" height={250}>
+          <ResponsiveContainer width="100%" height={260}>
             {chartType === 'pie' ? (
               <PieChart>
-                <Pie data={chartData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label>
+                <Pie 
+                  data={chartData} 
+                  dataKey="value" 
+                  nameKey="name" 
+                  cx="50%" 
+                  cy="50%" 
+                  outerRadius={75} 
+                  label={renderPieLabel}
+                >
                   {chartData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />
                   ))}
                 </Pie>
-                <Tooltip />
+                <Tooltip 
+                  formatter={(val: any) => [
+                    formatCurrency(Number(val) || 0),
+                    'Total'
+                  ]}
+                />
                 <Legend />
               </PieChart>
             ) : (
               <BarChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" />
-                <YAxis />
-                <Tooltip />
+                <YAxis 
+                  tickFormatter={(val) => `R$ ${val >= 1000 ? `${(val / 1000).toFixed(0)}k` : val}`}
+                />
+                <Tooltip 
+                  formatter={(val: any) => [
+                    formatCurrency(Number(val) || 0),
+                    'Total'
+                  ]}
+                />
                 <Bar dataKey="value" fill="#8884d8">
                   {chartData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />

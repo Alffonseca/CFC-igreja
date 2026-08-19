@@ -213,7 +213,7 @@ export default function Layout({ role, userName }: LayoutProps) {
       )}
 
       {/* Main Content */}
-      <main className="flex-1 w-full max-w-full overflow-x-hidden overflow-y-auto p-2 sm:p-4 pb-24 lg:ml-64 lg:p-8 lg:pb-8 scrollbar-hide print:p-0 print:m-0 print:overflow-visible print:w-full print:max-w-none">
+      <main className="flex-1 w-full max-w-full p-2 sm:p-4 pb-28 lg:ml-64 lg:p-8 lg:pb-8 print:p-0 print:m-0 print:overflow-visible print:w-full print:max-w-none">
         {privateMessageAlert && (
           <div className="fixed top-20 right-4 bg-blue-600 text-white p-4 rounded-lg shadow-lg z-50 flex items-center gap-4 print:hidden">
             <span>Nova mensagem privada de {privateMessageAlert.senderName}</span>

@@ -530,7 +530,7 @@ export default function AnnualConsolidatedReport({
       {/* ========================================================= */}
       {/* 📄 FOLHA DE IMPRESSÃO OFICIAL A4 DO CONSOLIDADO ANUAL     */}
       {/* ========================================================= */}
-      <div className="w-full max-w-full overflow-x-auto pb-6">
+      <div className="w-full max-w-full overflow-x-auto pb-10 sheet-scroll-container touch-auto">
         <div 
           id="print-annual-sheet"
           ref={printAnnualRef}

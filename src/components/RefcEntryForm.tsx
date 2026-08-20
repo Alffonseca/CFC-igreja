@@ -26,7 +26,9 @@ import {
   CheckCircle2, 
   RotateCcw,
   X,
-  FileSpreadsheet
+  FileSpreadsheet,
+  AlertTriangle,
+  Loader2
 } from 'lucide-react';
 import { format, getDaysInMonth, getDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -254,6 +256,8 @@ export default function RefcEntryForm() {
   const [observations, setObservations] = useState('');
   const [isSavingToDb, setIsSavingToDb] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
+  const [showClearModal, setShowClearModal] = useState(false);
+  const [isClearingMonth, setIsClearingMonth] = useState(false);
 
   const commonExpenseSuggestions = [
     'TAXA ÁGUA',
@@ -314,6 +318,26 @@ export default function RefcEntryForm() {
         if (data.targetMissions !== undefined) setTargetMissions(data.targetMissions);
         if (data.observations !== undefined) setObservations(data.observations);
         if (data.stats) setStats(prev => ({ ...prev, ...data.stats }));
+      } else {
+        // Se o documento NÃO existe no Firestore (ex: após zerar o mês), verifica se há cache local
+        const savedStr = localStorage.getItem(`refc_data_${selectedMonthYear}`);
+        if (!savedStr) {
+          setDailyEntries(prev => prev.map(e => ({
+            ...e,
+            tithes: 0,
+            offeringGeneral: 0,
+            offeringSpecial: 0,
+            missions: 0,
+            total: 0
+          })));
+          setExpenses(ensureFixedExpensesList([]));
+          setTotalGeneralTarget('');
+          setTargetTithes('');
+          setTargetOfferingGeneral('');
+          setTargetOfferingSpecial('');
+          setTargetMissions('');
+          setObservations('');
+        }
       }
     }, (err) => {
       console.warn('Erro ao escutar do Firestore para', selectedMonthYear, err);
@@ -694,23 +718,30 @@ export default function RefcEntryForm() {
   };
 
   const handleRemoveExpense = async (id: string, description?: string) => {
-    if (window.confirm(`Deseja realmente excluir a despesa "${description || 'selecionada'}"?`)) {
-      const updated = expenses.filter(exp => exp.id !== id);
-      setExpenses(updated);
-      await persistExpensesToFirestore(updated);
-      setSyncStatus('Despesa excluída com sucesso!');
-      setTimeout(() => setSyncStatus(null), 3000);
-    }
+    const updated = expenses.filter(exp => exp.id !== id);
+    setExpenses(updated);
+    await persistExpensesToFirestore(updated);
+    setSyncStatus(`Despesa "${description || 'selecionada'}" excluída!`);
+    setTimeout(() => setSyncStatus(null), 3000);
   };
 
+  // 🗑️ Abrir Modal para Zerar todos os lançamentos do mês
   const handleClearAll = () => {
-    if (window.confirm(`Deseja ZERAR todos os lançamentos de ${competenciaExtenso}?`)) {
+    setShowClearModal(true);
+  };
+
+  // Executar Zeramento Completo
+  const executeClearMonth = async () => {
+    setIsClearingMonth(true);
+    try {
+      // 1. Limpar estados locais na memória
       setTotalGeneralTarget('');
       setTargetTithes('');
       setTargetOfferingGeneral('');
       setTargetOfferingSpecial('');
       setTargetMissions('');
-      setExpenses([]);
+      setObservations('');
+      setExpenses(ensureFixedExpensesList([]));
       setDailyEntries(prev => prev.map(e => ({
         ...e,
         tithes: 0,
@@ -719,11 +750,41 @@ export default function RefcEntryForm() {
         missions: 0,
         total: 0
       })));
+
+      // 2. Limpar cache local (localStorage)
       try {
         localStorage.removeItem(`refc_data_${selectedMonthYear}`);
       } catch (e) {}
-      setSyncStatus('Todos os valores foram zerados!');
-      setTimeout(() => setSyncStatus(null), 3500);
+
+      // 3. Excluir documento no Firestore (refc_reports/{selectedMonthYear})
+      try {
+        await deleteDoc(doc(db, 'refc_reports', selectedMonthYear));
+      } catch (err) {
+        console.warn('Erro ao excluir documento refc_reports:', err);
+      }
+
+      // 4. Excluir transações financeiras vinculadas a este mês no Financeiro
+      try {
+        const qExisting = query(
+          collection(db, 'transactions'),
+          where('refcMonth', '==', selectedMonthYear)
+        );
+        const snapExisting = await getDocs(qExisting);
+        const deletePromises = snapExisting.docs.map(d => deleteDoc(doc(db, 'transactions', d.id)));
+        await Promise.all(deletePromises);
+      } catch (err) {
+        console.warn('Erro ao excluir transações vinculadas:', err);
+      }
+
+      await logAction('REFC Zerar Mês', `Zerou todos os lançamentos e relatórios de ${competenciaExtenso}`);
+      setSyncStatus(`Mês de ${competenciaExtenso} foi 100% zerado no banco de dados e relatórios! Você já pode relançar do zero.`);
+      setTimeout(() => setSyncStatus(null), 5000);
+      setShowClearModal(false);
+    } catch (err: any) {
+      console.error('Erro ao zerar mês:', err);
+      setSyncStatus('Erro ao zerar mês no banco de dados: ' + (err.message || String(err)));
+    } finally {
+      setIsClearingMonth(false);
     }
   };
 
@@ -1562,6 +1623,65 @@ export default function RefcEntryForm() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE CONFIRMAÇÃO PARA ZERAR O MÊS */}
+      {showClearModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fade-in">
+          <div className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border border-zinc-200">
+            <div className="flex items-center gap-3 text-rose-600 mb-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-rose-100">
+                <AlertTriangle size={24} className="text-rose-600" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-zinc-900">Zerar Mês ({competenciaExtenso})</h3>
+                <p className="text-xs text-zinc-500">Esta ação apagará os lançamentos deste mês</p>
+              </div>
+            </div>
+
+            <div className="mb-5 rounded-xl bg-rose-50/70 border border-rose-100 p-3.5 text-xs text-rose-950 space-y-1.5">
+              <p className="font-bold">O que será zerado:</p>
+              <ul className="list-disc pl-4 space-y-1 text-rose-800">
+                <li>Todos os valores de cultos (Dízimos e Ofertas)</li>
+                <li>Todas as despesas deste mês</li>
+                <li>O relatório salvo no Banco de Dados</li>
+                <li>As transações sincronizadas no Módulo Financeiro</li>
+              </ul>
+              <p className="text-[11px] text-rose-700 pt-1 font-semibold">
+                O mês ficará 100% limpo para você relançar do zero.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                disabled={isClearingMonth}
+                onClick={() => setShowClearModal(false)}
+                className="rounded-xl border border-zinc-200 px-4 py-2.5 text-xs font-bold text-zinc-700 hover:bg-zinc-100 transition-all active:scale-95 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isClearingMonth}
+                onClick={executeClearMonth}
+                className="flex items-center gap-1.5 rounded-xl bg-rose-600 px-4 py-2.5 text-xs font-bold text-white shadow-md hover:bg-rose-700 transition-all active:scale-95 disabled:opacity-50"
+              >
+                {isClearingMonth ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    Zerando...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={16} />
+                    Sim, Zerar Tudo
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

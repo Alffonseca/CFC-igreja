@@ -88,19 +88,19 @@ export default function Dashboard() {
   if (loading) return <div>Carregando...</div>;
 
   return (
-    <div className="space-y-8">
-      <header className="flex items-center justify-between">
+    <div className="space-y-8 w-full max-w-full">
+      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-zinc-900">Dashboard</h1>
-          <p className="text-zinc-500">Resumo financeiro de {format(new Date(), 'MMMM yyyy', { locale: ptBR })}</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-zinc-900">Dashboard</h1>
+          <p className="text-xs sm:text-sm text-zinc-500">Resumo financeiro de {format(new Date(), 'MMMM yyyy', { locale: ptBR })}</p>
         </div>
         {churchSettings && (churchSettings.qrCodeUrl || churchSettings.titheMessage) && (
-          <div className="flex items-center gap-4 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-zinc-200">
+          <div className="flex items-center gap-3 sm:gap-4 rounded-2xl bg-white p-3 sm:p-4 shadow-sm ring-1 ring-zinc-200">
             {churchSettings.qrCodeUrl && (
-              <img src={churchSettings.qrCodeUrl} alt="QR Code" className="h-16 w-16 object-contain" referrerPolicy="no-referrer" />
+              <img src={churchSettings.qrCodeUrl} alt="QR Code" className="h-12 w-12 sm:h-16 sm:w-16 object-contain" referrerPolicy="no-referrer" />
             )}
             {churchSettings.titheMessage && (
-              <p className="text-sm font-medium text-zinc-700 max-w-[200px]">{churchSettings.titheMessage}</p>
+              <p className="text-xs sm:text-sm font-medium text-zinc-700 max-w-[200px]">{churchSettings.titheMessage}</p>
             )}
           </div>
         )}

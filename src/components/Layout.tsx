@@ -213,7 +213,7 @@ export default function Layout({ role, userName }: LayoutProps) {
       )}
 
       {/* Main Content */}
-      <main className="flex-1 w-full max-w-full p-2 sm:p-4 pb-28 lg:ml-64 lg:p-8 lg:pb-8 print:p-0 print:m-0 print:overflow-visible print:w-full print:max-w-none">
+      <main className="flex-1 w-full max-w-full min-w-0 p-2 sm:p-4 pb-28 lg:pl-64 lg:p-8 lg:pb-8 print:p-0 print:m-0 print:overflow-visible print:w-full print:max-w-none">
         {privateMessageAlert && (
           <div className="fixed top-20 right-4 bg-blue-600 text-white p-4 rounded-lg shadow-lg z-50 flex items-center gap-4 print:hidden">
             <span>Nova mensagem privada de {privateMessageAlert.senderName}</span>
@@ -227,8 +227,8 @@ export default function Layout({ role, userName }: LayoutProps) {
       </main>
 
       {/* Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-zinc-200 bg-white pb-safe pt-1.5 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] lg:hidden print:hidden">
-        <div className="mx-auto flex max-w-lg items-center justify-start sm:justify-center overflow-x-auto px-1 scrollbar-hide gap-0.5 touch-pan-x">
+      <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-zinc-200 bg-white pb-safe pt-1.5 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] lg:hidden print:hidden max-w-full overflow-hidden">
+        <div className="mx-auto flex w-full max-w-full items-center justify-start sm:justify-center overflow-x-auto px-1 scrollbar-hide gap-0.5 touch-pan-x">
           {navItems.map((item) => (
             <NavLink
               key={item.to}

@@ -1,6 +1,26 @@
 @import "tailwindcss";
 
 @layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  html, body, #root {
+    width: 100%;
+    max-width: 100vw;
+    min-height: 100%;
+    overflow-x: hidden;
+    margin: 0;
+    padding: 0;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  img, video, canvas, svg {
+    max-width: 100%;
+    height: auto;
+  }
+
   @media print {
     @page {
       size: A4 portrait;
@@ -69,7 +89,8 @@
     overflow-y: visible !important;
     -webkit-overflow-scrolling: touch !important;
     touch-action: pan-x pan-y pinch-zoom !important;
-    overscroll-behavior: auto !important;
+    overscroll-behavior-x: contain !important;
+    max-width: 100% !important;
   }
   .sheet-scroll-container input,
   .sheet-scroll-input,

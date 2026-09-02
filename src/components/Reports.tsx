@@ -7,6 +7,7 @@ import { motion } from 'motion/react';
 import { startOfMonth, endOfMonth, format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { cn } from '../lib/utils';
+import { printHtmlElements } from '../lib/printUtils';
 import QuadrangularReport from './QuadrangularReport';
 
 interface Transaction {
@@ -56,7 +57,30 @@ export default function Reports({ role }: ReportsProps) {
     (searchParams.get('type') as 'quadrangular' | 'financial' | 'cells' | 'meetings') || 
     (role === 'cell' ? 'cells' : 'quadrangular')
   );
-  const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [selectedDate, setSelectedDate] = useState(() => {
+    try {
+      const savedMonth = localStorage.getItem('ieq_selected_month_year');
+      if (savedMonth && /^\d{4}-\d{2}$/.test(savedMonth)) {
+        return `${savedMonth}-01`;
+      }
+    } catch (e) {
+      // Ignore
+    }
+    return format(new Date(), 'yyyy-MM-dd');
+  });
+
+  useEffect(() => {
+    if (selectedDate && selectedDate.length >= 7) {
+      const mStr = selectedDate.substring(0, 7);
+      if (/^\d{4}-\d{2}$/.test(mStr)) {
+        try {
+          localStorage.setItem('ieq_selected_month_year', mStr);
+        } catch (e) {
+          // Ignore
+        }
+      }
+    }
+  }, [selectedDate]);
   const [reportMode, setReportMode] = useState<'daily' | 'monthly'>('monthly');
   const [settings, setSettings] = useState<ChurchSettings | null>(null);
   const [logoError, setLogoError] = useState(false);
@@ -159,7 +183,18 @@ export default function Reports({ role }: ReportsProps) {
   const balance = Math.round((totals.tithes + totals.offerings - totals.expenses) * 100) / 100;
 
   const handlePrint = () => {
-    window.print();
+    if (printRef.current) {
+      try {
+        printHtmlElements([printRef.current], {
+          title: `Relatório - ${settings?.name || 'Igreja'} - ${reportMode === 'monthly' ? format(reportDate, 'MM/yyyy', { locale: ptBR }) : format(reportDate, 'dd/MM/yyyy', { locale: ptBR })}`
+        });
+      } catch (err) {
+        console.warn('Erro ao imprimir relatório geral:', err);
+        window.print();
+      }
+    } else {
+      window.print();
+    }
   };
 
   return (

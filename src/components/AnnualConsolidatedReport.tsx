@@ -17,12 +17,15 @@ import {
   ZoomOut,
   Maximize2,
   Move,
-  Smartphone
+  Smartphone,
+  Loader2,
+  AlertTriangle,
+  X
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import * as XLSX from 'xlsx';
-import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
+import { printHtmlElements } from '../lib/printUtils';
+import { captureElementToPng, downloadPdfFromPngList, openPdfInNewTab } from '../lib/pdfCapture';
 import { collection, query, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -66,10 +69,40 @@ export default function AnnualConsolidatedReport({
   onSelectMonth,
   initialYear = '2026'
 }: AnnualConsolidatedReportProps) {
-  const [selectedYear, setSelectedYear] = useState<string>(initialYear);
+  const [selectedYear, setSelectedYear] = useState<string>(() => {
+    try {
+      const savedYear = localStorage.getItem('ieq_selected_year');
+      if (savedYear && /^\d{4}$/.test(savedYear)) {
+        return savedYear;
+      }
+      const savedMonth = localStorage.getItem('ieq_selected_month_year');
+      if (savedMonth && savedMonth.length >= 4 && /^\d{4}/.test(savedMonth)) {
+        return savedMonth.substring(0, 4);
+      }
+    } catch (e) {
+      // Ignore
+    }
+    return initialYear;
+  });
+
+  useEffect(() => {
+    if (selectedYear && /^\d{4}$/.test(selectedYear)) {
+      try {
+        localStorage.setItem('ieq_selected_year', selectedYear);
+      } catch (e) {
+        // Ignore
+      }
+    }
+  }, [selectedYear]);
   const [monthsData, setMonthsData] = useState<MonthSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [pdfNotification, setPdfNotification] = useState<{
+    status: 'generating' | 'ready' | 'error';
+    message?: string;
+    blobUrl?: string;
+    fileName?: string;
+  } | null>(null);
   const printAnnualRef = useRef<HTMLDivElement>(null);
 
   // Estados para Gestos e Zoom Responsivo Mobile (Android / iOS)
@@ -272,49 +305,48 @@ export default function AnnualConsolidatedReport({
 
   // Impressão Oficial da Folha A4 do Consolidado Anual
   const handlePrintAnnual = () => {
-    window.print();
+    try {
+      printHtmlElements(['print-annual-sheet'], {
+        title: `Consolidado Anual ${selectedYear} - ${churchInfo.churchName}`
+      });
+    } catch (err) {
+      console.warn('Erro na impressão direta do consolidado, usando fallback nativo:', err);
+      setTimeout(() => {
+        window.print();
+      }, 50);
+    }
   };
 
   // Baixar PDF Oficial do Consolidado Anual
   const handleDownloadPdfAnnual = async () => {
     setIsGeneratingPdf(true);
-    let clone: HTMLElement | null = null;
-    try {
-      const elem = document.getElementById('print-annual-sheet');
-      if (elem) {
-        // Clona para garantir captura perfeita de 794px sem interferência do zoom mobile
-        clone = elem.cloneNode(true) as HTMLElement;
-        clone.id = 'print-annual-sheet-clone';
-        clone.style.display = 'block';
-        clone.style.visibility = 'visible';
-        clone.style.position = 'fixed';
-        clone.style.left = '-9999px';
-        clone.style.top = '0';
-        clone.style.width = '794px';
-        clone.style.minHeight = '1123px';
-        clone.style.transform = 'none';
-        clone.style.zIndex = '-9999';
-        document.body.appendChild(clone);
+    const fileName = `CONSOLIDADO_ANUAL_IEQ_${selectedYear}.pdf`;
 
-        const canvas = await html2canvas(clone, {
-          scale: 2,
-          useCORS: true,
-          logging: false,
-          backgroundColor: '#ffffff',
-          windowWidth: 1000
-        });
-        const imgData = canvas.toDataURL('image/png');
-        const pdf = new jsPDF('p', 'mm', 'a4');
-        pdf.addImage(imgData, 'PNG', 0, 0, 210, 297, undefined, 'FAST');
-        pdf.save(`CONSOLIDADO_ANUAL_IEQ_${selectedYear}.pdf`);
+    setPdfNotification({
+      status: 'generating',
+      message: `Renderizando demonstrativo consolidado de ${selectedYear} em alta definição...`,
+      fileName
+    });
+
+    try {
+      const png = await captureElementToPng('print-annual-sheet');
+      if (!png) {
+        throw new Error('Folha do consolidado não encontrada.');
       }
+      const result = await downloadPdfFromPngList([png], fileName);
+      setPdfNotification({
+        status: 'ready',
+        message: `Consolidado Anual ${selectedYear} gerado e baixado no seu dispositivo!`,
+        blobUrl: result.blobUrl,
+        fileName
+      });
     } catch (err: any) {
       console.error('Erro ao gerar PDF anual:', err);
-      alert('Erro ao gerar PDF. Você também pode clicar em "Imprimir Consolidado".');
+      setPdfNotification({
+        status: 'error',
+        message: 'Erro ao gerar PDF: ' + (err?.message || 'Falha ao capturar o consolidado. Tente novamente.')
+      });
     } finally {
-      if (clone && clone.parentNode) {
-        clone.parentNode.removeChild(clone);
-      }
       setIsGeneratingPdf(false);
     }
   };
@@ -863,6 +895,101 @@ export default function AnnualConsolidatedReport({
         </div>
         </div>
       </div>
+
+      {/* MODAL DE STATUS E DOWNLOAD DE PDF */}
+      {pdfNotification && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs animate-fade-in print:hidden">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border border-zinc-200 animate-scale-up">
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-100 mb-4">
+              <div className="flex items-center gap-2.5">
+                {pdfNotification.status === 'generating' && (
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-purple-100 text-purple-700 animate-pulse">
+                    <Loader2 size={20} className="animate-spin" />
+                  </div>
+                )}
+                {pdfNotification.status === 'ready' && (
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
+                    <CheckCircle2 size={22} />
+                  </div>
+                )}
+                {pdfNotification.status === 'error' && (
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-100 text-rose-700">
+                    <AlertTriangle size={22} />
+                  </div>
+                )}
+                <div>
+                  <h3 className="text-base font-bold text-zinc-900">
+                    {pdfNotification.status === 'generating' && 'Gerando Consolidado Anual...'}
+                    {pdfNotification.status === 'ready' && 'PDF Anual Pronto com Sucesso!'}
+                    {pdfNotification.status === 'error' && 'Atenção ao Gerar PDF'}
+                  </h3>
+                  <p className="text-xs text-zinc-500">Documento Oficial A4 (12 Meses)</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPdfNotification(null)}
+                className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 transition-colors cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <p className="text-sm text-zinc-700 font-medium">
+                {pdfNotification.message}
+              </p>
+
+              {pdfNotification.status === 'ready' && pdfNotification.blobUrl && (
+                <div className="space-y-2 pt-2">
+                  <a
+                    href={pdfNotification.blobUrl}
+                    download={pdfNotification.fileName || `CONSOLIDADO_ANUAL_${selectedYear}.pdf`}
+                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-purple-700 px-4 py-3 text-sm font-bold text-white shadow-md hover:bg-purple-800 transition-all active:scale-95"
+                  >
+                    <Download size={18} />
+                    Baixar Arquivo PDF Novamente
+                  </a>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (pdfNotification.blobUrl) {
+                        openPdfInNewTab(pdfNotification.blobUrl);
+                      }
+                    }}
+                    className="w-full flex items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-xs font-bold text-zinc-800 hover:bg-zinc-100 transition-all active:scale-95 cursor-pointer"
+                  >
+                    <Printer size={16} className="text-zinc-600" />
+                    Abrir em Nova Aba (Para Visualizar e Imprimir)
+                  </button>
+                </div>
+              )}
+
+              {pdfNotification.status === 'error' && (
+                <button
+                  type="button"
+                  onClick={handleDownloadPdfAnnual}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-zinc-900 px-4 py-3 text-sm font-bold text-white shadow-md hover:bg-zinc-800 transition-all active:scale-95"
+                >
+                  <RefreshCw size={16} />
+                  Tentar Novamente
+                </button>
+              )}
+            </div>
+
+            <div className="mt-5 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setPdfNotification(null)}
+                className="rounded-xl border border-zinc-200 px-4 py-2 text-xs font-bold text-zinc-600 hover:bg-zinc-50 transition-all cursor-pointer"
+              >
+                Fechar Janela
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

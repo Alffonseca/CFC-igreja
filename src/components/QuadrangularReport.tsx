@@ -34,8 +34,8 @@ import { format, parseISO, getDaysInMonth, startOfMonth, getDay } from 'date-fns
 import { ptBR } from 'date-fns/locale';
 import { cn } from '../lib/utils';
 import * as XLSX from 'xlsx';
-import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
+import { printHtmlElements } from '../lib/printUtils';
+import { captureElementToPng, downloadPdfFromPngList, openPdfInNewTab } from '../lib/pdfCapture';
 import { collection, query, where, getDocs, addDoc, deleteDoc, serverTimestamp, doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { logAction } from '../lib/logger';
@@ -74,10 +74,33 @@ interface ChurchInfo {
 
 export default function QuadrangularReport({ role }: { role: string | null }) {
   const [searchParams, setSearchParams] = useSearchParams();
-  // Competência selecionada (pega da URL ou padrão para o mês corrente ex: 2026-08)
+  // Competência selecionada (pega da URL, do localStorage ou padrão para o mês corrente ex: 2026-08)
   const [selectedMonthYear, setSelectedMonthYear] = useState(() => {
-    return searchParams.get('month') || format(new Date(), 'yyyy-MM');
+    const urlMonth = searchParams.get('month');
+    if (urlMonth && /^\d{4}-\d{2}$/.test(urlMonth)) {
+      return urlMonth;
+    }
+    try {
+      const savedMonth = localStorage.getItem('ieq_selected_month_year');
+      if (savedMonth && /^\d{4}-\d{2}$/.test(savedMonth)) {
+        return savedMonth;
+      }
+    } catch (e) {
+      // Ignore localStorage errors
+    }
+    return format(new Date(), 'yyyy-MM');
   });
+
+  // Mantém a competência selecionada sempre gravada no localStorage para não resetar ao navegar
+  useEffect(() => {
+    if (selectedMonthYear && /^\d{4}-\d{2}$/.test(selectedMonthYear)) {
+      try {
+        localStorage.setItem('ieq_selected_month_year', selectedMonthYear);
+      } catch (e) {
+        // Ignore localStorage errors
+      }
+    }
+  }, [selectedMonthYear]);
   const [activeTab, setActiveTab] = useState<'refc' | 'entradas' | 'expenses' | 'annual'>('refc');
   const [printMode, setPrintMode] = useState<'refc' | 'entradas' | 'both'>('refc');
   const [isSavingToDb, setIsSavingToDb] = useState(false);
@@ -131,6 +154,12 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
 
   const [observations, setObservations] = useState('');
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [pdfNotification, setPdfNotification] = useState<{
+    status: 'generating' | 'ready' | 'error';
+    message?: string;
+    blobUrl?: string;
+    fileName?: string;
+  } | null>(null);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const [showClearModal, setShowClearModal] = useState(false);
   const [isClearingMonth, setIsClearingMonth] = useState(false);
@@ -1119,113 +1148,81 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
     XLSX.writeFile(wb, `RELATORIO_QUADRANGULAR_${monthNameUpper}_${currentYear}.xlsx`);
   };
 
-  // Utilitário confiável para captura de folha A4 com html2canvas mesmo quando a aba está oculta ou com zoom no celular
-  const captureSheet = async (elementId: string): Promise<HTMLCanvasElement | null> => {
-    const elem = document.getElementById(elementId);
-    if (!elem) {
-      console.warn(`Elemento #${elementId} não encontrado no DOM.`);
-      return null;
-    }
-
-    let clone: HTMLElement | null = null;
-    let targetElem = elem;
-
-    // Sempre clona para garantir captura estrita de 794px x 1123px sem transformações de zoom mobile
-    clone = elem.cloneNode(true) as HTMLElement;
-    clone.id = `${elementId}-temp-clone`;
-    clone.classList.remove('hidden', 'print:hidden');
-    clone.style.display = 'block';
-    clone.style.visibility = 'visible';
-    clone.style.position = 'fixed';
-    clone.style.left = '-9999px';
-    clone.style.top = '0';
-    clone.style.width = '794px'; // 210mm em 96 DPI
-    clone.style.minHeight = '1123px'; // 297mm em 96 DPI
-    clone.style.transform = 'none';
-    clone.style.zIndex = '-9999';
-    document.body.appendChild(clone);
-    targetElem = clone;
-
-    try {
-      await new Promise(resolve => setTimeout(resolve, 80));
-      const canvas = await html2canvas(targetElem, {
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
-        logging: false,
-        backgroundColor: '#ffffff',
-        windowWidth: 1000
-      });
-      return canvas;
-    } catch (err) {
-      console.error(`Erro ao capturar folha ${elementId}:`, err);
-      throw err;
-    } finally {
-      if (clone && clone.parentNode) {
-        clone.parentNode.removeChild(clone);
-      }
-    }
-  };
-
   // Gerar PDF direto de alta resolução (1 Página A4 para cada Aba ou Completo com 2 Páginas)
   const handleDownloadPdf = async (targetTab: 'refc' | 'entradas' | 'expenses' | 'both') => {
     setIsGeneratingPdf(true);
-    try {
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const pdfWidth = 210;
-      const pdfHeight = 297;
+    const effectiveTab = targetTab === 'expenses' ? 'refc' : targetTab;
+    const fileName = `RELATORIO_QUADRANGULAR_${effectiveTab === 'both' ? 'COMPLETO_2PAGS' : effectiveTab.toUpperCase()}_${monthNameUpper}_${currentYear}.pdf`;
 
-      const effectiveTab = targetTab === 'expenses' ? 'refc' : targetTab;
+    setPdfNotification({
+      status: 'generating',
+      message: 'Renderizando páginas em alta definição e gerando arquivo PDF...',
+      fileName
+    });
+
+    try {
+      const pngs: (string | null)[] = [];
 
       if (effectiveTab === 'refc' || effectiveTab === 'both') {
-        const canvasRefc = await captureSheet('print-refc-sheet');
-        if (canvasRefc) {
-          const imgData = canvasRefc.toDataURL('image/png');
-          pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
-        }
-      }
-
-      if (effectiveTab === 'both') {
-        pdf.addPage();
+        const pngRefc = await captureElementToPng('print-refc-sheet');
+        if (pngRefc) pngs.push(pngRefc);
       }
 
       if (effectiveTab === 'entradas' || effectiveTab === 'both') {
-        const canvasEntradas = await captureSheet('print-entradas-sheet');
-        if (canvasEntradas) {
-          const imgData = canvasEntradas.toDataURL('image/png');
-          if (effectiveTab === 'entradas') {
-            pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
-          } else {
-            pdf.setPage(2);
-            pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
-          }
-        }
+        const pngEntradas = await captureElementToPng('print-entradas-sheet');
+        if (pngEntradas) pngs.push(pngEntradas);
       }
 
-      const fileName = `RELATORIO_QUADRANGULAR_${effectiveTab === 'both' ? 'COMPLETO_2PAGS' : effectiveTab.toUpperCase()}_${monthNameUpper}_${currentYear}.pdf`;
-      pdf.save(fileName);
+      if (pngs.length === 0) {
+        throw new Error('Nenhuma folha encontrada para gerar PDF.');
+      }
+
+      const result = await downloadPdfFromPngList(pngs, fileName);
+
+      setPdfNotification({
+        status: 'ready',
+        message: 'PDF gerado e download iniciado com sucesso!',
+        blobUrl: result.blobUrl,
+        fileName
+      });
       setSyncStatus('PDF baixado com sucesso!');
       setTimeout(() => setSyncStatus(null), 3000);
     } catch (err: any) {
       console.error('Erro ao gerar PDF:', err);
-      alert('Não foi possível gerar o PDF direto. Você também pode clicar no botão "Imprimir" e selecionar "Salvar como PDF" no navegador.');
+      setPdfNotification({
+        status: 'error',
+        message: 'Erro ao gerar PDF: ' + (err?.message || 'Falha ao capturar o documento. Tente novamente.')
+      });
     } finally {
       setIsGeneratingPdf(false);
     }
   };
 
-  // Disparar Impressão Oficial do Navegador
+  // Disparar Impressão Oficial do Navegador / Impressora Padrão
   const handlePrint = (mode: 'refc' | 'entradas' | 'both') => {
     setPrintMode(mode);
 
-    const handleAfterPrint = () => {
-      window.removeEventListener('afterprint', handleAfterPrint);
-    };
-    window.addEventListener('afterprint', handleAfterPrint);
-
-    setTimeout(() => {
-      window.print();
-    }, 250);
+    try {
+      if (mode === 'refc') {
+        printHtmlElements(['print-refc-sheet'], {
+          title: `REFC - ${competenciaExtenso} - ${churchInfo.churchName}`
+        });
+      } else if (mode === 'entradas') {
+        printHtmlElements(['print-entradas-sheet'], {
+          title: `Entradas de Cultos - ${competenciaExtenso} - ${churchInfo.churchName}`
+        });
+      } else {
+        printHtmlElements(['print-refc-sheet', 'print-entradas-sheet'], {
+          title: `Relatório Completo - ${competenciaExtenso} - ${churchInfo.churchName}`,
+          pageBreakBetween: true
+        });
+      }
+    } catch (err) {
+      console.warn('Erro na impressão direta, usando fallback nativo:', err);
+      setTimeout(() => {
+        window.print();
+      }, 50);
+    }
   };
 
   return (
@@ -1474,7 +1471,7 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
                 transition: 'width 0.2s ease, min-height 0.2s ease',
                 flexShrink: 0
               }}
-              className="print:w-auto print:min-h-0 print:m-0"
+              className="print:w-auto print:min-h-0 print:m-0 flex flex-col items-center"
             >
               {/* CONTAINER DO REFC (PÁGINA 1) */}
               <div
@@ -2068,36 +2065,100 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
         </div>
       )}
 
-      {/* Regras CSS de Impressão A4 Exatas (1 Página por Aba) */}
-      <style>{`
-        @media print {
-          @page {
-            size: A4 portrait;
-            margin: 8mm;
-          }
-          body {
-            background: white !important;
-            color: black !important;
-            margin: 0 !important;
-            padding: 0 !important;
-          }
-          .print\\:hidden {
-            display: none !important;
-          }
-          #print-refc-sheet, #print-entradas-sheet {
-            box-shadow: none !important;
-            border: none !important;
-            margin: 0 auto !important;
-            padding: 0 !important;
-            width: 100% !important;
-            max-width: 100% !important;
-          }
-          .print\\:break-after-page {
-            page-break-after: always !important;
-            break-after: page !important;
-          }
-        }
-      `}</style>
+      {/* MODAL DE STATUS E DOWNLOAD DE PDF */}
+      {pdfNotification && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs animate-fade-in print:hidden">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border border-zinc-200 animate-scale-up">
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-100 mb-4">
+              <div className="flex items-center gap-2.5">
+                {pdfNotification.status === 'generating' && (
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100 text-blue-700 animate-pulse">
+                    <Loader2 size={20} className="animate-spin" />
+                  </div>
+                )}
+                {pdfNotification.status === 'ready' && (
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
+                    <CheckCircle2 size={22} />
+                  </div>
+                )}
+                {pdfNotification.status === 'error' && (
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-100 text-rose-700">
+                    <AlertTriangle size={22} />
+                  </div>
+                )}
+                <div>
+                  <h3 className="text-base font-bold text-zinc-900">
+                    {pdfNotification.status === 'generating' && 'Gerando Relatório PDF...'}
+                    {pdfNotification.status === 'ready' && 'PDF Pronto com Sucesso!'}
+                    {pdfNotification.status === 'error' && 'Atenção ao Gerar PDF'}
+                  </h3>
+                  <p className="text-xs text-zinc-500">Documento Oficial Modelo A4</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPdfNotification(null)}
+                className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 transition-colors cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <p className="text-sm text-zinc-700 font-medium">
+                {pdfNotification.message}
+              </p>
+
+              {pdfNotification.status === 'ready' && pdfNotification.blobUrl && (
+                <div className="space-y-2 pt-2">
+                  <a
+                    href={pdfNotification.blobUrl}
+                    download={pdfNotification.fileName || 'relatorio_quadrangular.pdf'}
+                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white shadow-md hover:bg-blue-700 transition-all active:scale-95"
+                  >
+                    <Download size={18} />
+                    Baixar Arquivo PDF Novamente
+                  </a>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (pdfNotification.blobUrl) {
+                        openPdfInNewTab(pdfNotification.blobUrl);
+                      }
+                    }}
+                    className="w-full flex items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-xs font-bold text-zinc-800 hover:bg-zinc-100 transition-all active:scale-95 cursor-pointer"
+                  >
+                    <Printer size={16} className="text-zinc-600" />
+                    Abrir em Nova Aba (Para Visualizar e Imprimir)
+                  </button>
+                </div>
+              )}
+
+              {pdfNotification.status === 'error' && (
+                <button
+                  type="button"
+                  onClick={() => handleDownloadPdf('both')}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-zinc-900 px-4 py-3 text-sm font-bold text-white shadow-md hover:bg-zinc-800 transition-all active:scale-95"
+                >
+                  <RefreshCw size={16} />
+                  Tentar Novamente
+                </button>
+              )}
+            </div>
+
+            <div className="mt-5 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setPdfNotification(null)}
+                className="rounded-xl border border-zinc-200 px-4 py-2 text-xs font-bold text-zinc-600 hover:bg-zinc-50 transition-all cursor-pointer"
+              >
+                Fechar Janela
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

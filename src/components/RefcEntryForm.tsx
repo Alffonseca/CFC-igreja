@@ -176,7 +176,27 @@ function RefcCurrencyCell({
 }
 
 export default function RefcEntryForm() {
-  const [selectedMonthYear, setSelectedMonthYear] = useState(() => format(new Date(), 'yyyy-MM'));
+  const [selectedMonthYear, setSelectedMonthYear] = useState(() => {
+    try {
+      const savedMonth = localStorage.getItem('ieq_selected_month_year');
+      if (savedMonth && /^\d{4}-\d{2}$/.test(savedMonth)) {
+        return savedMonth;
+      }
+    } catch (e) {
+      // Ignore
+    }
+    return format(new Date(), 'yyyy-MM');
+  });
+
+  useEffect(() => {
+    if (selectedMonthYear && /^\d{4}-\d{2}$/.test(selectedMonthYear)) {
+      try {
+        localStorage.setItem('ieq_selected_month_year', selectedMonthYear);
+      } catch (e) {
+        // Ignore
+      }
+    }
+  }, [selectedMonthYear]);
   const [churchInfo, setChurchInfo] = useState<ChurchInfo>({
     churchName: 'TABERNÁCULO DA FAMÍLIA',
     pastorName: 'MARCELO PONTES',

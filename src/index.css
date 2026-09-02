@@ -16,6 +16,23 @@
     text-size-adjust: 100%;
   }
 
+  /* Estratégia de Impressão Universal Direta */
+  body.is-printing-direct > #root {
+    display: none !important;
+  }
+
+  body.is-printing-direct > #direct-universal-print-container {
+    display: block !important;
+    visibility: visible !important;
+    width: 210mm !important;
+    margin: 0 auto !important;
+    background: #ffffff !important;
+  }
+
+  #direct-universal-print-container {
+    display: none;
+  }
+
   img, video, canvas, svg {
     max-width: 100%;
     height: auto;
@@ -27,18 +44,40 @@
       margin: 0 !important;
     }
     
+    *, *::before, *::after {
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+      text-shadow: none !important;
+      filter: none !important;
+    }
+
     html, body {
       background: #ffffff !important;
       color: #000000 !important;
       margin: 0 !important;
       padding: 0 !important;
       width: 210mm !important;
-      height: 100% !important;
+      max-width: none !important;
+      min-height: 0 !important;
+      height: auto !important;
       overflow: visible !important;
-      -webkit-print-color-adjust: exact !important;
-      print-color-adjust: exact !important;
+      overflow-x: visible !important;
+      overflow-y: visible !important;
     }
 
+    /* Se estiver no modo direto, esconde root e exibe só o container */
+    body.is-printing-direct > #root {
+      display: none !important;
+    }
+
+    body.is-printing-direct > #direct-universal-print-container {
+      display: block !important;
+      visibility: visible !important;
+      width: 210mm !important;
+      margin: 0 auto !important;
+    }
+
+    /* Fallback padrão de impressão nativa */
     header, nav, aside, footer, .print\:hidden, .no-print, [role="navigation"] {
       display: none !important;
     }
@@ -51,19 +90,22 @@
       overflow: visible !important;
     }
 
-    #print-refc-sheet, #print-entradas-sheet {
+    #print-refc-sheet, #print-entradas-sheet, #print-annual-sheet, .printable-sheet {
+      display: block !important;
+      visibility: visible !important;
       margin: 0 auto !important;
       box-shadow: none !important;
       border: 1px solid #000000 !important;
       width: 210mm !important;
+      min-width: 210mm !important;
       max-width: 210mm !important;
       min-height: 296mm !important;
-      max-height: 297mm !important;
       padding: 6mm 8mm !important;
       box-sizing: border-box !important;
       page-break-inside: avoid !important;
       break-inside: avoid !important;
-      overflow: hidden !important;
+      overflow: visible !important;
+      transform: none !important;
     }
 
     .print-page-break {
@@ -100,4 +142,3 @@
     user-select: auto;
   }
 }
-

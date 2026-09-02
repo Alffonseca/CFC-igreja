@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { collection, query, onSnapshot, where, Timestamp, doc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { TrendingUp, TrendingDown, Wallet, DollarSign } from 'lucide-react';
+import { TrendingUp, TrendingDown, Wallet, DollarSign, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
 import { motion } from 'motion/react';
-import { startOfMonth, endOfMonth, format } from 'date-fns';
+import { startOfMonth, endOfMonth, format, parse, addMonths, subMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 
@@ -20,6 +20,29 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [chartType, setChartType] = useState<'pie' | 'bar'>('pie');
   const [churchSettings, setChurchSettings] = useState<{ qrCodeUrl?: string; titheMessage?: string } | null>(null);
+
+  // Mês selecionado (persiste e sincroniza com os relatórios e REFC)
+  const [selectedMonthYear, setSelectedMonthYear] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('ieq_selected_month_year');
+      if (saved && /^\d{4}-\d{2}$/.test(saved)) {
+        return saved;
+      }
+    } catch (e) {
+      // Ignore
+    }
+    return format(new Date(), 'yyyy-MM');
+  });
+
+  useEffect(() => {
+    if (selectedMonthYear && /^\d{4}-\d{2}$/.test(selectedMonthYear)) {
+      try {
+        localStorage.setItem('ieq_selected_month_year', selectedMonthYear);
+      } catch (e) {
+        // Ignore
+      }
+    }
+  }, [selectedMonthYear]);
 
   useEffect(() => {
     const q = query(collection(db, 'transactions'));
@@ -41,10 +64,28 @@ export default function Dashboard() {
     };
   }, []);
 
-  const currentMonth = startOfMonth(new Date());
+  const parsedMonthDate = (() => {
+    try {
+      const parsed = parse(selectedMonthYear, 'yyyy-MM', new Date());
+      return isNaN(parsed.getTime()) ? new Date() : parsed;
+    } catch {
+      return new Date();
+    }
+  })();
+
+  const handlePrevMonth = () => {
+    const prev = subMonths(parsedMonthDate, 1);
+    setSelectedMonthYear(format(prev, 'yyyy-MM'));
+  };
+
+  const handleNextMonth = () => {
+    const next = addMonths(parsedMonthDate, 1);
+    setSelectedMonthYear(format(next, 'yyyy-MM'));
+  };
+
   const monthTransactions = transactions.filter(t => {
-    const tDate = new Date(t.date);
-    return tDate >= currentMonth && tDate <= endOfMonth(new Date());
+    if (!t.date) return false;
+    return t.date.startsWith(selectedMonthYear);
   });
 
   const totals = monthTransactions.reduce((acc, t) => {
@@ -62,7 +103,7 @@ export default function Dashboard() {
   const balance = Math.round((totals.tithes + totals.offerings - totals.expenses) * 100) / 100;
 
   const stats = [
-    { label: 'Dizimos', value: totals.tithes, icon: TrendingUp, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+    { label: 'Dízimos', value: totals.tithes, icon: TrendingUp, color: 'text-emerald-600', bg: 'bg-emerald-50' },
     { label: 'Ofertas', value: totals.offerings, icon: TrendingUp, color: 'text-blue-600', bg: 'bg-blue-50' },
     { label: 'Despesas', value: totals.expenses, icon: TrendingDown, color: 'text-rose-600', bg: 'bg-rose-50' },
     { label: 'Saldo Mensal', value: balance, icon: Wallet, color: 'text-zinc-900', bg: 'bg-zinc-100' },
@@ -85,25 +126,61 @@ export default function Dashboard() {
     return `${formatted} (${pct}%)`;
   };
 
-  if (loading) return <div>Carregando...</div>;
+  if (loading) return <div className="p-8 text-center text-zinc-500 font-medium">Carregando painel geral...</div>;
 
   return (
     <div className="space-y-8 w-full max-w-full">
-      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold text-zinc-900">Dashboard</h1>
-          <p className="text-xs sm:text-sm text-zinc-500">Resumo financeiro de {format(new Date(), 'MMMM yyyy', { locale: ptBR })}</p>
+          <p className="text-xs sm:text-sm text-zinc-500 capitalize">
+            Resumo financeiro de {format(parsedMonthDate, 'MMMM \'de\' yyyy', { locale: ptBR })}
+          </p>
         </div>
-        {churchSettings && (churchSettings.qrCodeUrl || churchSettings.titheMessage) && (
-          <div className="flex items-center gap-3 sm:gap-4 rounded-2xl bg-white p-3 sm:p-4 shadow-sm ring-1 ring-zinc-200">
-            {churchSettings.qrCodeUrl && (
-              <img src={churchSettings.qrCodeUrl} alt="QR Code" className="h-12 w-12 sm:h-16 sm:w-16 object-contain" referrerPolicy="no-referrer" />
-            )}
-            {churchSettings.titheMessage && (
-              <p className="text-xs sm:text-sm font-medium text-zinc-700 max-w-[200px]">{churchSettings.titheMessage}</p>
-            )}
+
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Seletor do Mês Sincronizado */}
+          <div className="flex items-center gap-1.5 bg-white p-1.5 rounded-xl border border-zinc-200 shadow-sm">
+            <button
+              onClick={handlePrevMonth}
+              title="Mês anterior"
+              className="p-1.5 text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-colors"
+            >
+              <ChevronLeft size={18} />
+            </button>
+            <div className="flex items-center gap-1.5 px-2">
+              <Calendar size={15} className="text-blue-600" />
+              <input
+                type="month"
+                value={selectedMonthYear}
+                onChange={(e) => {
+                  if (e.target.value) {
+                    setSelectedMonthYear(e.target.value);
+                  }
+                }}
+                className="text-xs sm:text-sm font-bold text-zinc-800 bg-transparent border-none focus:outline-none cursor-pointer"
+              />
+            </div>
+            <button
+              onClick={handleNextMonth}
+              title="Próximo mês"
+              className="p-1.5 text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-colors"
+            >
+              <ChevronRight size={18} />
+            </button>
           </div>
-        )}
+
+          {churchSettings && (churchSettings.qrCodeUrl || churchSettings.titheMessage) && (
+            <div className="flex items-center gap-3 rounded-xl bg-white p-2.5 shadow-sm ring-1 ring-zinc-200">
+              {churchSettings.qrCodeUrl && (
+                <img src={churchSettings.qrCodeUrl} alt="QR Code" className="h-10 w-10 sm:h-12 sm:w-12 object-contain" referrerPolicy="no-referrer" />
+              )}
+              {churchSettings.titheMessage && (
+                <p className="text-xs font-medium text-zinc-700 max-w-[180px] hidden sm:block">{churchSettings.titheMessage}</p>
+              )}
+            </div>
+          )}
+        </div>
       </header>
 
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
@@ -146,7 +223,7 @@ export default function Dashboard() {
               </div>
             ))}
             {monthTransactions.length === 0 && (
-              <p className="text-center text-zinc-500 py-8">Nenhum lançamento este mês.</p>
+              <p className="text-center text-zinc-500 py-8">Nenhum lançamento no mês selecionado.</p>
             )}
           </div>
         </div>

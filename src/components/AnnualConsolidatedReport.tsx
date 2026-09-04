@@ -114,10 +114,27 @@ export default function AnnualConsolidatedReport({
 
   useEffect(() => {
     const handleWinResize = () => {
-      setScreenWidth(window.innerWidth);
+      if (sheetScrollWrapperRef.current && sheetScrollWrapperRef.current.clientWidth > 0) {
+        setScreenWidth(sheetScrollWrapperRef.current.clientWidth);
+      } else {
+        setScreenWidth(window.innerWidth);
+      }
     };
+    handleWinResize();
     window.addEventListener('resize', handleWinResize);
-    return () => window.removeEventListener('resize', handleWinResize);
+
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && sheetScrollWrapperRef.current) {
+      ro = new ResizeObserver(() => {
+        handleWinResize();
+      });
+      ro.observe(sheetScrollWrapperRef.current);
+    }
+
+    return () => {
+      window.removeEventListener('resize', handleWinResize);
+      ro?.disconnect();
+    };
   }, []);
 
   const isSmallScreen = screenWidth < 840;
@@ -637,17 +654,17 @@ export default function AnnualConsolidatedReport({
       {/* ========================================================= */}
       {/* 📄 FOLHA DE IMPRESSÃO OFICIAL A4 DO CONSOLIDADO ANUAL     */}
       {/* ========================================================= */}
-      {/* Barra de Controle de Visualização e Gestos no Celular */}
-      <div className="mb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 rounded-2xl bg-white p-3 sm:p-4 border border-zinc-200 shadow-xs md:hidden print:hidden">
+      {/* Barra de Controle de Visualização e Gestos no Celular e Tablet */}
+      <div className="mb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 rounded-2xl bg-white p-3 sm:p-4 border border-zinc-200 shadow-xs lg:hidden print:hidden">
         <div className="flex items-center gap-2">
           <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-100 text-blue-700 flex-shrink-0">
             <Smartphone size={18} />
           </span>
           <div>
-            <p className="text-xs font-bold text-zinc-900 leading-tight">Visualização do Consolidado</p>
+            <p className="text-xs font-bold text-zinc-900 leading-tight">Visualização Celular / Tablet</p>
             <p className="text-[11px] text-zinc-500">
               {mobileZoomMode === 'fit' 
-                ? '✨ Modo Ajustado: role verticalmente com o dedo' 
+                ? '✨ Modo Ajustado: centralizado e pronto para visualização' 
                 : `🔍 Zoom ${Math.round(currentSheetScale * 100)}%: arraste em qualquer direção (2D)`}
             </p>
           </div>
@@ -715,25 +732,30 @@ export default function AnnualConsolidatedReport({
         onTouchStart={handleSheetTouchStart}
         onTouchMove={handleSheetTouchMove}
         onTouchEnd={handleSheetTouchEnd}
-        className="w-full max-w-full overflow-x-auto pb-10 sheet-scroll-container touch-auto flex justify-start md:justify-center"
+        className={cn(
+          "w-full max-w-full overflow-x-auto pb-10 sheet-scroll-container touch-auto flex",
+          Math.round(794 * currentSheetScale) > screenWidth ? "justify-start" : "justify-center"
+        )}
       >
         <div
           style={{
             width: currentSheetScale === 1 ? 'auto' : `${Math.round(794 * currentSheetScale)}px`,
             minHeight: currentSheetScale === 1 ? 'auto' : `${Math.round(1123 * currentSheetScale)}px`,
-            transition: 'width 0.2s ease, min-height 0.2s ease',
+            height: currentSheetScale === 1 ? 'auto' : `${Math.round(1123 * currentSheetScale)}px`,
+            overflow: currentSheetScale !== 1 ? 'hidden' : 'visible',
+            transition: 'width 0.2s ease, height 0.2s ease',
             flexShrink: 0
           }}
-          className="print:w-auto print:min-h-0 print:m-0"
+          className="print:w-auto print:min-h-0 print:h-auto print:m-0 print:overflow-visible mx-auto flex flex-col items-center"
         >
           <div 
             id="print-annual-sheet"
             ref={printAnnualRef}
-            className="mx-auto w-[210mm] min-w-[210mm] min-h-[297mm] bg-white text-black p-6 shadow-sm border border-zinc-300 flex flex-col justify-between font-sans print:border-none print:shadow-none print:m-0 print:p-0"
+            className="w-[210mm] min-w-[210mm] min-h-[297mm] bg-white text-black p-6 shadow-sm border border-zinc-300 flex flex-col justify-between font-sans print:border-none print:shadow-none print:m-0 print:p-0"
             style={{
               boxSizing: 'border-box',
               transform: currentSheetScale !== 1 ? `scale(${currentSheetScale})` : undefined,
-              transformOrigin: 'top left'
+              transformOrigin: 'top center'
             }}
           >
           <div>

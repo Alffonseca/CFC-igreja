@@ -177,10 +177,27 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
 
   useEffect(() => {
     const handleWinResize = () => {
-      setScreenWidth(window.innerWidth);
+      if (sheetScrollWrapperRef.current && sheetScrollWrapperRef.current.clientWidth > 0) {
+        setScreenWidth(sheetScrollWrapperRef.current.clientWidth);
+      } else {
+        setScreenWidth(window.innerWidth);
+      }
     };
+    handleWinResize();
     window.addEventListener('resize', handleWinResize);
-    return () => window.removeEventListener('resize', handleWinResize);
+
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && sheetScrollWrapperRef.current) {
+      ro = new ResizeObserver(() => {
+        handleWinResize();
+      });
+      ro.observe(sheetScrollWrapperRef.current);
+    }
+
+    return () => {
+      window.removeEventListener('resize', handleWinResize);
+      ro?.disconnect();
+    };
   }, []);
 
   const isSmallScreen = screenWidth < 840;
@@ -1383,17 +1400,17 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
           {/* VISUALIZAÇÃO DA FOLHA A4 OFICIAL (LAYOUT DE IMPRESSÃO / PDF)              */}
           {/* ========================================================================= */}
 
-          {/* Barra de Controle de Visualização e Gestos no Celular */}
-          <div className="mb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 rounded-2xl bg-white p-3 sm:p-4 border border-zinc-200 shadow-xs md:hidden print:hidden">
+          {/* Barra de Controle de Visualização e Gestos no Celular e Tablet */}
+          <div className="mb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 rounded-2xl bg-white p-3 sm:p-4 border border-zinc-200 shadow-xs lg:hidden print:hidden">
             <div className="flex items-center gap-2">
               <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-100 text-blue-700 flex-shrink-0">
                 <Smartphone size={18} />
               </span>
               <div>
-                <p className="text-xs font-bold text-zinc-900 leading-tight">Visualização no Celular</p>
+                <p className="text-xs font-bold text-zinc-900 leading-tight">Visualização Celular / Tablet</p>
                 <p className="text-[11px] text-zinc-500">
                   {mobileZoomMode === 'fit' 
-                    ? '✨ Modo Ajustado à Tela: role verticalmente com o dedo livremente' 
+                    ? '✨ Modo Ajustado à Tela: centralizado e pronto para visualização' 
                     : `🔍 Zoom ${Math.round(currentSheetScale * 100)}%: arraste em qualquer direção (2D)`}
                 </p>
               </div>
@@ -1461,17 +1478,22 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
             onTouchStart={handleSheetTouchStart}
             onTouchMove={handleSheetTouchMove}
             onTouchEnd={handleSheetTouchEnd}
-            className="flex justify-start md:justify-center overflow-x-auto pb-12 print:p-0 print:m-0 print:overflow-visible w-full max-w-full sheet-scroll-container touch-auto"
+            className={cn(
+              "flex overflow-x-auto pb-12 print:p-0 print:m-0 print:overflow-visible w-full max-w-full sheet-scroll-container touch-auto",
+              Math.round(794 * currentSheetScale) > screenWidth ? "justify-start" : "justify-center"
+            )}
           >
-            {/* Wrapper de escala responsiva para visualização mobile sem distorção */}
+            {/* Wrapper de escala responsiva para visualização mobile e tablet centralizada sem distorção */}
             <div
               style={{
                 width: currentSheetScale === 1 ? 'auto' : `${Math.round(794 * currentSheetScale)}px`,
                 minHeight: currentSheetScale === 1 ? 'auto' : `${Math.round(1123 * currentSheetScale)}px`,
-                transition: 'width 0.2s ease, min-height 0.2s ease',
+                height: currentSheetScale === 1 ? 'auto' : `${Math.round(1123 * currentSheetScale)}px`,
+                overflow: currentSheetScale !== 1 ? 'hidden' : 'visible',
+                transition: 'width 0.2s ease, height 0.2s ease',
                 flexShrink: 0
               }}
-              className="print:w-auto print:min-h-0 print:m-0 flex flex-col items-center"
+              className="print:w-auto print:min-h-0 print:h-auto print:m-0 print:overflow-visible flex flex-col items-center mx-auto"
             >
               {/* CONTAINER DO REFC (PÁGINA 1) */}
               <div
@@ -1485,7 +1507,7 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
                 style={{
                   boxSizing: 'border-box',
                   transform: currentSheetScale !== 1 ? `scale(${currentSheetScale})` : undefined,
-                  transformOrigin: 'top left'
+                  transformOrigin: 'top center'
                 }}
               >
           {/* Cabeçalho Oficial Quadrangular */}
@@ -1722,7 +1744,7 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
           style={{
             boxSizing: 'border-box',
             transform: currentSheetScale !== 1 ? `scale(${currentSheetScale})` : undefined,
-            transformOrigin: 'top left'
+            transformOrigin: 'top center'
           }}
         >
           {/* Cabeçalho do Resumo Financeiro */}

@@ -200,12 +200,11 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
     };
   }, []);
 
-  const isSmallScreen = screenWidth < 840;
-  // A4 largura padrão 794px. Calcula fator para caber 100% na largura da tela mobile
-  const calculatedFitScale = Math.min(1, Math.max(0.32, (screenWidth - 28) / 794));
-  const currentSheetScale = isSmallScreen
-    ? (mobileZoomMode === 'fit' ? calculatedFitScale : (mobileZoomMode === '100' ? 1.0 : customZoomScale))
-    : 1.0;
+  // A4 largura padrão 794px. Calcula fator para caber na largura disponível da tela (retrato ou paisagem)
+  const calculatedFitScale = Math.min(1.0, Math.max(0.32, (screenWidth - 28) / 794));
+  const currentSheetScale = mobileZoomMode === 'fit'
+    ? calculatedFitScale
+    : (mobileZoomMode === '100' ? 1.0 : customZoomScale);
 
   // Manipulador de toque 2D para permitir arrastar a folha livremente em qualquer direção
   const handleSheetTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
@@ -1245,23 +1244,24 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
   return (
     <div className="space-y-6 w-full max-w-full">
       {/* Barra Superior de Controle */}
-      <div className="flex flex-col gap-4 rounded-2xl bg-white p-4 sm:p-5 border border-zinc-200 shadow-sm print:hidden w-full max-w-full">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="inline-flex items-center rounded-md bg-amber-50 px-2 py-1 text-xs font-bold text-amber-700 ring-1 ring-inset ring-amber-600/20">
-                Modelo Oficial
-              </span>
-              <h2 className="text-lg sm:text-xl font-bold text-zinc-900 truncate">
-                Relatório Quadrangular (REFC, Entradas & Anual)
-              </h2>
-            </div>
-            <p className="text-xs sm:text-sm text-zinc-500 mt-0.5">
-              Lançamentos oficiais de cultos, despesas discriminadas, 25% da Sede e consolidação anual de todos os meses.
-            </p>
+      <div className="flex flex-col gap-3.5 rounded-2xl bg-white p-4 sm:p-5 border border-zinc-200 shadow-sm print:hidden w-full max-w-full">
+        {/* Título Oficial - Sempre no Topo em Retrato e Paisagem */}
+        <div className="min-w-0 w-full">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="inline-flex items-center rounded-md bg-amber-50 px-2 py-1 text-xs font-bold text-amber-700 ring-1 ring-inset ring-amber-600/20">
+              Modelo Oficial
+            </span>
+            <h2 className="text-lg sm:text-xl font-bold text-zinc-900 truncate">
+              Relatório Quadrangular (REFC, Entradas & Anual)
+            </h2>
           </div>
+          <p className="text-xs sm:text-sm text-zinc-500 mt-1">
+            Lançamentos oficiais de cultos, despesas discriminadas, 25% da Sede e consolidação anual de todos os meses.
+          </p>
+        </div>
 
-          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+        {/* Controles, Abas e Botões de Ação - Sempre abaixo do Título */}
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full">
             {/* Seletor de Competência (oculto quando no anual) */}
             {activeTab !== 'annual' && (
               <div className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
@@ -1382,7 +1382,6 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
               </div>
             )}
           </div>
-        </div>
       </div>
 
       {activeTab === 'annual' ? (
@@ -1400,14 +1399,14 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
           {/* VISUALIZAÇÃO DA FOLHA A4 OFICIAL (LAYOUT DE IMPRESSÃO / PDF)              */}
           {/* ========================================================================= */}
 
-          {/* Barra de Controle de Visualização e Gestos no Celular e Tablet */}
-          <div className="mb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 rounded-2xl bg-white p-3 sm:p-4 border border-zinc-200 shadow-xs lg:hidden print:hidden">
+          {/* Barra de Controle de Visualização e Zoom (Modo Retrato e Paisagem) */}
+          <div className="mb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 rounded-2xl bg-white p-3 sm:p-4 border border-zinc-200 shadow-xs print:hidden">
             <div className="flex items-center gap-2">
               <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-100 text-blue-700 flex-shrink-0">
                 <Smartphone size={18} />
               </span>
               <div>
-                <p className="text-xs font-bold text-zinc-900 leading-tight">Visualização Celular / Tablet</p>
+                <p className="text-xs font-bold text-zinc-900 leading-tight">Visualização da Folha A4</p>
                 <p className="text-[11px] text-zinc-500">
                   {mobileZoomMode === 'fit' 
                     ? '✨ Modo Ajustado à Tela: centralizado e pronto para visualização' 

@@ -137,11 +137,11 @@ export default function AnnualConsolidatedReport({
     };
   }, []);
 
-  const isSmallScreen = screenWidth < 840;
-  const calculatedFitScale = Math.min(1, Math.max(0.32, (screenWidth - 28) / 794));
-  const currentSheetScale = isSmallScreen
-    ? (mobileZoomMode === 'fit' ? calculatedFitScale : (mobileZoomMode === '100' ? 1.0 : customZoomScale))
-    : 1.0;
+  // A4 largura padrão 794px. Calcula fator para caber na largura disponível da tela (retrato ou paisagem)
+  const calculatedFitScale = Math.min(1.0, Math.max(0.32, (screenWidth - 28) / 794));
+  const currentSheetScale = mobileZoomMode === 'fit'
+    ? calculatedFitScale
+    : (mobileZoomMode === '100' ? 1.0 : customZoomScale);
 
   const handleSheetTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
     if (e.touches.length === 1 && sheetScrollWrapperRef.current) {
@@ -427,8 +427,8 @@ export default function AnnualConsolidatedReport({
   return (
     <div className="space-y-6 w-full max-w-full overflow-hidden">
       {/* Barra de Controle do Consolidado Anual */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 rounded-2xl bg-white p-4 sm:p-5 border border-zinc-200 shadow-sm print:hidden">
-        <div className="min-w-0">
+      <div className="flex flex-col gap-3.5 rounded-2xl bg-white p-4 sm:p-5 border border-zinc-200 shadow-sm print:hidden">
+        <div className="min-w-0 w-full">
           <div className="flex items-center gap-2">
             <span className="inline-flex items-center rounded-md bg-purple-50 px-2 py-1 text-xs font-bold text-purple-700 ring-1 ring-inset ring-purple-600/20">
               Fechamento do Ano
@@ -654,14 +654,14 @@ export default function AnnualConsolidatedReport({
       {/* ========================================================= */}
       {/* 📄 FOLHA DE IMPRESSÃO OFICIAL A4 DO CONSOLIDADO ANUAL     */}
       {/* ========================================================= */}
-      {/* Barra de Controle de Visualização e Gestos no Celular e Tablet */}
-      <div className="mb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 rounded-2xl bg-white p-3 sm:p-4 border border-zinc-200 shadow-xs lg:hidden print:hidden">
+      {/* Barra de Controle de Visualização e Zoom (Modo Retrato e Paisagem) */}
+      <div className="mb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 rounded-2xl bg-white p-3 sm:p-4 border border-zinc-200 shadow-xs print:hidden">
         <div className="flex items-center gap-2">
           <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-100 text-blue-700 flex-shrink-0">
             <Smartphone size={18} />
           </span>
           <div>
-            <p className="text-xs font-bold text-zinc-900 leading-tight">Visualização Celular / Tablet</p>
+            <p className="text-xs font-bold text-zinc-900 leading-tight">Visualização da Folha A4</p>
             <p className="text-[11px] text-zinc-500">
               {mobileZoomMode === 'fit' 
                 ? '✨ Modo Ajustado: centralizado e pronto para visualização' 

@@ -53,3 +53,8 @@ Ao iniciar um novo projeto no AI Studio, você pode usar este arquivo como rotei
 
 - **Flexibilidade no Dashboard:**
   - O Dashboard agora exibe a mensagem de dízimos/ofertas mesmo que o QR Code não esteja cadastrado, permitindo maior flexibilidade para o pastor.
+
+- **Oferta de Missões (Isolamento de Cálculo):**
+  - A Oferta de Missões (3º Domingo / SEMEQ) foi desvinculada do cálculo do Total Arrecadado geral da igreja, da Taxa da Sede (25%) e do total diário dos cultos.
+  - O valor de Missões permanece exibido exclusivamente em sua coluna, campo e resumo oficial dedicados.
+

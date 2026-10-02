@@ -476,13 +476,12 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
         alert('Por favor, informe um valor total maior que zero para distribuir.');
         return;
       }
-      // Distribuição proporcional típica de igreja:
-      // 80% Dízimos, 14% Oferta Geral, 4.8% Oferta Especial, 1.2% Missões
-      tMissions = Math.min(50, Math.round(total * 0.012));
-      const remaining = total - tMissions;
-      tTithes = Math.round(remaining * 0.82);
-      tOffGen = Math.round(remaining * 0.14);
-      tOffSpec = total - (tTithes + tOffGen + tMissions);
+      // Distribuição proporcional típica de igreja (Dízimos 82%, Oferta Geral 14%, Oferta Especial 4%):
+      // Oferta de missões não entra no cálculo da arrecadação a distribuir
+      tTithes = Math.round(total * 0.82);
+      tOffGen = Math.round(total * 0.14);
+      tOffSpec = total - (tTithes + tOffGen);
+      tMissions = parseFloat(targetMissions) || 0;
     } else {
       tTithes = parseFloat(targetTithes) || 0;
       tOffGen = parseFloat(targetOfferingGeneral) || 0;
@@ -577,7 +576,8 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
       const og = distOfGen[index] || 0;
       const oe = distOfEsp[index] || 0;
       const m = entry.isThirdSunday ? tMissions : 0;
-      const tot = d + og + oe + m;
+      // Missão NÃO entra no total calculado do dia
+      const tot = d + og + oe;
 
       return {
         ...entry,
@@ -600,7 +600,8 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
     setDailyEntries(prev => prev.map(entry => {
       if (entry.day === day) {
         const updated = { ...entry, [field]: val };
-        updated.total = Math.round((updated.tithes + updated.offeringGeneral + updated.offeringSpecial + updated.missions) * 100) / 100;
+        // Oferta de missões não entra no cálculo do total do dia
+        updated.total = Math.round((updated.tithes + updated.offeringGeneral + updated.offeringSpecial) * 100) / 100;
         return updated;
       }
       return entry;
@@ -612,13 +613,14 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
   const totalOfferingGenSum = Math.round(dailyEntries.reduce((sum, d) => sum + (d.offeringGeneral || 0), 0) * 100) / 100;
   const totalOfferingSpecSum = Math.round(dailyEntries.reduce((sum, d) => sum + (d.offeringSpecial || 0), 0) * 100) / 100;
   const totalMissionsSum = Math.round(dailyEntries.reduce((sum, d) => sum + (d.missions || 0), 0) * 100) / 100;
-  const totalArrecadacao = Math.round((totalTithesSum + totalOfferingGenSum + totalOfferingSpecSum + totalMissionsSum) * 100) / 100;
+  // Oferta de missões NÃO entra no cálculo da arrecadação geral
+  const totalArrecadacao = Math.round((totalTithesSum + totalOfferingGenSum + totalOfferingSpecSum) * 100) / 100;
 
-  // Taxa da Região / Sede (25% sobre a arrecadação total)
+  // Taxa da Região / Sede (25% sobre a arrecadação total de dízimos e ofertas)
   const taxaSede25 = Math.round((totalArrecadacao * 0.25) * 100) / 100;
 
   // Total para a Sede no Resumo Diário
-  const totalSedeResumo = Math.round((taxaSede25 - totalMissionsSum) * 100) / 100;
+  const totalSedeResumo = taxaSede25;
 
   // Totais de Saídas (incluindo a taxa de 25% da região)
   const manualExpensesSum = Math.round(expenses.reduce((sum, e) => sum + (e.amount || 0), 0) * 100) / 100;

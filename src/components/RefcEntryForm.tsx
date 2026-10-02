@@ -479,7 +479,8 @@ export default function RefcEntryForm() {
   const totalOfferingSpecSum = dailyEntries.reduce((acc, curr) => acc + (Number(curr.offeringSpecial) || 0), 0);
   const totalMissionsSum = dailyEntries.reduce((acc, curr) => acc + (Number(curr.missions) || 0), 0);
 
-  const totalArrecadacao = Math.round((totalTithesSum + totalOfferingGenSum + totalOfferingSpecSum + totalMissionsSum) * 100) / 100;
+  // Oferta de Missões NÃO entra no cálculo da arrecadação geral, aparece apenas no seu campo próprio
+  const totalArrecadacao = Math.round((totalTithesSum + totalOfferingGenSum + totalOfferingSpecSum) * 100) / 100;
   const taxaSede25 = Math.round((totalArrecadacao * 0.25) * 100) / 100;
   const manualExpensesSum = Math.round(expenses.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0) * 100) / 100;
   const totalSaidasComTaxa = Math.round((taxaSede25 + manualExpensesSum) * 100) / 100;
@@ -508,17 +509,16 @@ export default function RefcEntryForm() {
         return;
       }
       tMis = parseCurrencyInput(targetMissions);
-      const remainingTotal = Math.max(0, gTotal - tMis);
-      // Distribui o restante entre Dízimos (80%) e Ofertas Gerais (20%)
-      tDiz = Math.round(remainingTotal * 0.80 * 100) / 100;
-      tOfGen = Math.round((remainingTotal - tDiz) * 100) / 100;
+      // Oferta de missões não entra no cálculo da arrecadação a distribuir (distribui 80% Dízimos e 20% Ofertas Gerais)
+      tDiz = Math.round(gTotal * 0.80 * 100) / 100;
+      tOfGen = Math.round((gTotal - tDiz) * 100) / 100;
       tOfEsp = 0;
     } else {
       tDiz = parseCurrencyInput(targetTithes);
       tOfGen = parseCurrencyInput(targetOfferingGeneral);
       tOfEsp = parseCurrencyInput(targetOfferingSpecial);
       tMis = parseCurrencyInput(targetMissions);
-      if (tDiz + tOfGen + tOfEsp + tMis <= 0) {
+      if (tDiz + tOfGen + tOfEsp <= 0 && tMis <= 0) {
         alert('Por favor, informe os valores nas categorias para distribuir.');
         return;
       }
@@ -616,7 +616,8 @@ export default function RefcEntryForm() {
       const og = distOfGen[index] || 0;
       const oe = distOfEsp[index] || 0;
       const m = entry.isThirdSunday ? tMis : 0;
-      const tot = d + og + oe + m;
+      // Missão NÃO entra no total calculado do dia
+      const tot = d + og + oe;
 
       return {
         ...entry,
@@ -639,7 +640,8 @@ export default function RefcEntryForm() {
       const copy = [...prev];
       const target = { ...copy[dayIndex] };
       (target as any)[field] = numVal;
-      target.total = Math.round(((target.tithes || 0) + (target.offeringGeneral || 0) + (target.offeringSpecial || 0) + (target.missions || 0)) * 100) / 100;
+      // Oferta de missões não entra no total diário da arrecadação
+      target.total = Math.round(((target.tithes || 0) + (target.offeringGeneral || 0) + (target.offeringSpecial || 0)) * 100) / 100;
       copy[dayIndex] = target;
       return copy;
     });

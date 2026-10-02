@@ -56,6 +56,12 @@ export default function Login() {
   const [imageLoading, setImageLoading] = useState(true);
 
   useEffect(() => {
+    const savedError = sessionStorage.getItem('login_error');
+    if (savedError) {
+      setError(savedError);
+      sessionStorage.removeItem('login_error');
+    }
+
     const unsubscribe = onSnapshot(doc(db, 'settings', 'church'), (sDoc) => {
       if (sDoc.exists()) {
         setChurchSettings(sDoc.data() as any);

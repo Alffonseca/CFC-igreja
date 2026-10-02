@@ -70,7 +70,7 @@ export default function App() {
           } else {
             console.log('App: Usuário não autorizado.');
             await auth.signOut();
-            alert('Acesso não autorizado. Entre em contato com o administrador para ser cadastrado.');
+            sessionStorage.setItem('login_error', 'Acesso não autorizado. Entre em contato com o administrador para ser cadastrado.');
             setUser(null);
             setRole(null);
             setUserName(null);

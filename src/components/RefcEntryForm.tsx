@@ -481,9 +481,19 @@ export default function RefcEntryForm() {
 
   // Oferta de Missões NÃO entra no cálculo da arrecadação geral, aparece apenas no seu campo próprio
   const totalArrecadacao = Math.round((totalTithesSum + totalOfferingGenSum + totalOfferingSpecSum) * 100) / 100;
-  const taxaSede25 = Math.round((totalArrecadacao * 0.25) * 100) / 100;
+  
+  // Taxas Oficiais sobre a Arrecadação:
+  // 1º Linha: TAXA NACIONAL (5,32%)
+  // 2º Linha: TAXA ESTADUAL (11,40%)
+  // 3º Linha: TAXA REGIONAL (4%)
+  const taxaNacional = Math.round((totalArrecadacao * 0.0532) * 100) / 100;
+  const taxaEstadual = Math.round((totalArrecadacao * 0.1140) * 100) / 100;
+  const taxaRegional = Math.round((totalArrecadacao * 0.0400) * 100) / 100;
+  const totalTaxasOficiais = Math.round((taxaNacional + taxaEstadual + taxaRegional) * 100) / 100;
+  const taxaSede25 = totalTaxasOficiais; // Mantido para retrocompatibilidade com relatórios consolidados
+
   const manualExpensesSum = Math.round(expenses.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0) * 100) / 100;
-  const totalSaidasComTaxa = Math.round((taxaSede25 + manualExpensesSum) * 100) / 100;
+  const totalSaidasComTaxa = Math.round((totalTaxasOficiais + manualExpensesSum) * 100) / 100;
   const saldoFinalMes = Math.round((totalArrecadacao - totalSaidasComTaxa) * 100) / 100;
 
   const [currentYear, currentMonthNum] = selectedMonthYear.split('-');
@@ -843,6 +853,10 @@ export default function RefcEntryForm() {
           totalOfferingSpecial: totalOfferingSpecSum,
           totalMissions: totalMissionsSum,
           totalArrecadacao,
+          taxaNacional,
+          taxaEstadual,
+          taxaRegional,
+          totalTaxasOficiais,
           taxaSede25,
           totalExpenses: manualExpensesSum,
           totalSaidas: totalSaidasComTaxa,
@@ -947,14 +961,41 @@ export default function RefcEntryForm() {
         }
       });
 
-      if (taxaSede25 > 0) {
+      // Inserir Taxas Oficiais no Financeiro (Nacional 5,32%, Estadual 11,40%, Regional 4%)
+      if (taxaNacional > 0) {
         newTransactions.push({
           type: 'expense',
-          amount: taxaSede25,
+          amount: taxaNacional,
           date: `${currentYear}-${currentMonthNum}-28`,
-          description: `Taxa da Região/Sede (25%) - ${competenciaExtenso}`,
-          category: 'Taxa Regional Sede',
-          destination: 'Sede Regional IEQ',
+          description: `TAXA NACIONAL (5,32% SOBRE A ARRECADAÇÃO) - ${competenciaExtenso}`,
+          category: 'Taxa Nacional',
+          destination: 'Conselho Nacional IEQ',
+          createdBy: currentUid,
+          createdAt: serverTimestamp(),
+          refcMonth: selectedMonthYear
+        });
+      }
+      if (taxaEstadual > 0) {
+        newTransactions.push({
+          type: 'expense',
+          amount: taxaEstadual,
+          date: `${currentYear}-${currentMonthNum}-28`,
+          description: `TAXA ESTADUAL (11,40% SOBRE A ARRECADAÇÃO) - ${competenciaExtenso}`,
+          category: 'Taxa Estadual',
+          destination: 'Conselho Estadual IEQ',
+          createdBy: currentUid,
+          createdAt: serverTimestamp(),
+          refcMonth: selectedMonthYear
+        });
+      }
+      if (taxaRegional > 0) {
+        newTransactions.push({
+          type: 'expense',
+          amount: taxaRegional,
+          date: `${currentYear}-${currentMonthNum}-28`,
+          description: `TAXA REGIONAL (4% SOBRE A ARRECADAÇÃO) - ${competenciaExtenso}`,
+          category: 'Taxa Regional',
+          destination: 'Região Eclesiástica IEQ',
           createdBy: currentUid,
           createdAt: serverTimestamp(),
           refcMonth: selectedMonthYear
@@ -1202,7 +1243,7 @@ export default function RefcEntryForm() {
                 Cálculo de Fechamento Oficial (REFC)
               </span>
               <p className="text-xs sm:text-sm font-medium text-zinc-700">
-                Resultado do Mês = <strong className="text-blue-900">Total Arrecadado</strong> (-) <strong className="text-rose-900">Total de Saídas (Despesas + 25%)</strong>
+                Resultado do Mês = <strong className="text-blue-900">Total Arrecadado</strong> (-) <strong className="text-rose-900">Total de Saídas (Despesas + Taxas Oficiais)</strong>
               </p>
             </div>
           </div>
@@ -1407,19 +1448,53 @@ export default function RefcEntryForm() {
                 );
               })}
 
-              {/* TAXA DA REGIÃO (25%) - FIXA OBRIGATÓRIA */}
+              {/* 1º Linha: TAXA NACIONAL (5,32% SOBRE A ARRECADAÇÃO) */}
               <tr className="bg-amber-50/60 font-bold border-t border-amber-200">
                 <td className="p-2.5 font-mono text-zinc-700">-</td>
                 <td className="p-2.5 text-zinc-950 uppercase">
-                  TAXA DA REGIÃO / SEDE (25%)
+                  (+) TAXA NACIONAL (5,32% SOBRE A ARRECADAÇÃO)
                 </td>
                 <td className="p-2.5 text-center">
                   <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900">
-                    Fixa (25% Automático)
+                    Fixa (5,32% Automático)
                   </span>
                 </td>
                 <td className="p-2.5 text-right font-mono text-amber-900 text-sm">
-                  {fmtCurrency(taxaSede25)}
+                  {fmtCurrency(taxaNacional)}
+                </td>
+                <td className="p-2.5 text-center text-zinc-400 text-[10px] font-mono">Auto</td>
+              </tr>
+
+              {/* 2º Linha: TAXA ESTADUAL (11,40% SOBRE A ARRECADAÇÃO) */}
+              <tr className="bg-amber-50/60 font-bold border-t border-amber-200">
+                <td className="p-2.5 font-mono text-zinc-700">-</td>
+                <td className="p-2.5 text-zinc-950 uppercase">
+                  (+) TAXA ESTADUAL (11,40% SOBRE A ARRECADAÇÃO)
+                </td>
+                <td className="p-2.5 text-center">
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900">
+                    Fixa (11,40% Automático)
+                  </span>
+                </td>
+                <td className="p-2.5 text-right font-mono text-amber-900 text-sm">
+                  {fmtCurrency(taxaEstadual)}
+                </td>
+                <td className="p-2.5 text-center text-zinc-400 text-[10px] font-mono">Auto</td>
+              </tr>
+
+              {/* 3º Linha: TAXA REGIONAL (4% SOBRE A ARRECADAÇÃO) */}
+              <tr className="bg-amber-50/60 font-bold border-t border-amber-200">
+                <td className="p-2.5 font-mono text-zinc-700">-</td>
+                <td className="p-2.5 text-zinc-950 uppercase">
+                  (+) TAXA REGIONAL (4% SOBRE A ARRECADAÇÃO)
+                </td>
+                <td className="p-2.5 text-center">
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900">
+                    Fixa (4% Automático)
+                  </span>
+                </td>
+                <td className="p-2.5 text-right font-mono text-amber-900 text-sm">
+                  {fmtCurrency(taxaRegional)}
                 </td>
                 <td className="p-2.5 text-center text-zinc-400 text-[10px] font-mono">Auto</td>
               </tr>
@@ -1434,9 +1509,23 @@ export default function RefcEntryForm() {
               </tr>
               <tr className="border-b border-zinc-200">
                 <td colSpan={3} className="p-2.5 text-amber-900 uppercase">
-                  (+) Taxa Região (25% sobre Arrecadação):
+                  (+) TAXA NACIONAL (5,32% SOBRE A ARRECADAÇÃO):
                 </td>
-                <td className="p-2.5 text-right font-mono text-amber-900">{fmtCurrency(taxaSede25)}</td>
+                <td className="p-2.5 text-right font-mono text-amber-900">{fmtCurrency(taxaNacional)}</td>
+                <td></td>
+              </tr>
+              <tr className="border-b border-zinc-200">
+                <td colSpan={3} className="p-2.5 text-amber-900 uppercase">
+                  (+) TAXA ESTADUAL (11,40% SOBRE A ARRECADAÇÃO):
+                </td>
+                <td className="p-2.5 text-right font-mono text-amber-900">{fmtCurrency(taxaEstadual)}</td>
+                <td></td>
+              </tr>
+              <tr className="border-b border-zinc-200">
+                <td colSpan={3} className="p-2.5 text-amber-900 uppercase">
+                  (+) TAXA REGIONAL (4% SOBRE A ARRECADAÇÃO):
+                </td>
+                <td className="p-2.5 text-right font-mono text-amber-900">{fmtCurrency(taxaRegional)}</td>
                 <td></td>
               </tr>
               <tr className="bg-rose-50/70 border-b-2 border-rose-200">

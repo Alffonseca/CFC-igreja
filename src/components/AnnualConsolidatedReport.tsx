@@ -224,7 +224,7 @@ export default function AnnualConsolidatedReport({
           offeringSpecial = Number(fsData.totals.totalOfferingSpecial) || 0;
           missions = Number(fsData.totals.totalMissions) || 0;
           totalEntradas = Number(fsData.totals.totalArrecadacao) || (tithes + offeringGeneral + offeringSpecial + missions);
-          taxaSede25 = Number(fsData.totals.taxaSede25) || (totalEntradas * 0.25);
+          taxaSede25 = Number(fsData.totals.totalTaxasOficiais) || Number(fsData.totals.taxaSede25) || (totalEntradas * 0.2072);
           expenses = Number(fsData.totals.totalExpenses) || 0;
           totalSaidas = Number(fsData.totals.totalSaidas) || (taxaSede25 + expenses);
           saldoMes = Number(fsData.totals.saldoFinal) || (totalEntradas - totalSaidas);
@@ -235,8 +235,8 @@ export default function AnnualConsolidatedReport({
             offeringSpecial += Number(e.offeringSpecial) || 0;
             missions += Number(e.missions) || 0;
           });
-          totalEntradas = tithes + offeringGeneral + offeringSpecial + missions;
-          taxaSede25 = totalEntradas * 0.25;
+          totalEntradas = tithes + offeringGeneral + offeringSpecial; // Missões não entram no cálculo geral
+          taxaSede25 = totalEntradas * 0.2072;
           if (fsData.expenses && Array.isArray(fsData.expenses)) {
             expenses = fsData.expenses.reduce((sum: number, exp: any) => sum + (Number(exp.amount) || 0), 0);
           }
@@ -256,8 +256,8 @@ export default function AnnualConsolidatedReport({
                 offeringSpecial += Number(e.offeringSpecial) || 0;
                 missions += Number(e.missions) || 0;
               });
-              totalEntradas = tithes + offeringGeneral + offeringSpecial + missions;
-              taxaSede25 = totalEntradas * 0.25;
+              totalEntradas = tithes + offeringGeneral + offeringSpecial; // Missões não entram no cálculo geral
+              taxaSede25 = totalEntradas * 0.2072;
               if (localData.expenses && Array.isArray(localData.expenses)) {
                 expenses = localData.expenses.reduce((sum: number, exp: any) => sum + (Number(exp.amount) || 0), 0);
               }

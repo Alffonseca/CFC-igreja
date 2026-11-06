@@ -58,3 +58,18 @@ Ao iniciar um novo projeto no AI Studio, você pode usar este arquivo como rotei
   - A Oferta de Missões (3º Domingo / SEMEQ) foi desvinculada do cálculo do Total Arrecadado geral da igreja, da Taxa da Sede (25%) e do total diário dos cultos.
   - O valor de Missões permanece exibido exclusivamente em sua coluna, campo e resumo oficial dedicados.
 
+- **Desdobramento das Taxas Oficiais (Substituição dos 25%):**
+  - A taxa anterior de 25% foi removida e substituída por 3 linhas oficiais calculadas sobre a Arrecadação:
+    1. `(+) TAXA NACIONAL (5,32% SOBRE A ARRECADAÇÃO)`
+    2. `(+) TAXA ESTADUAL (11,40% SOBRE A ARRECADAÇÃO)`
+    3. `(+) TAXA REGIONAL (4% SOBRE A ARRECADAÇÃO)`
+  - As 3 taxas são discriminadas na tabela de saídas, nos relatórios impressos/PDF do REFC e sincronizadas individualmente no Módulo Financeiro Geral.
+
+- **Dashboard - Cards de Taxas Oficiais:**
+  - O card de "Lançamentos Recentes" no menu principal foi substituído por 3 cards dedicados às taxas:
+    1. Card Taxa Nacional: valor em R$ e badge de 5,32%.
+    2. Card Taxa Estadual: valor em R$ e badge de 11,40%.
+    3. Card Taxa Regional: valor em R$ e badge de 4,00%.
+  - Exibe a base de arrecadação do mês e o somatório oficial total de taxas (20,72%).
+
+

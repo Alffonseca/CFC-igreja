@@ -616,15 +616,22 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
   // Oferta de missões NÃO entra no cálculo da arrecadação geral
   const totalArrecadacao = Math.round((totalTithesSum + totalOfferingGenSum + totalOfferingSpecSum) * 100) / 100;
 
-  // Taxa da Região / Sede (25% sobre a arrecadação total de dízimos e ofertas)
-  const taxaSede25 = Math.round((totalArrecadacao * 0.25) * 100) / 100;
+  // Taxas Oficiais sobre a Arrecadação:
+  // 1º Linha: TAXA NACIONAL (5,32%)
+  // 2º Linha: TAXA ESTADUAL (11,40%)
+  // 3º Linha: TAXA REGIONAL (4%)
+  const taxaNacional = Math.round((totalArrecadacao * 0.0532) * 100) / 100;
+  const taxaEstadual = Math.round((totalArrecadacao * 0.1140) * 100) / 100;
+  const taxaRegional = Math.round((totalArrecadacao * 0.0400) * 100) / 100;
+  const totalTaxasOficiais = Math.round((taxaNacional + taxaEstadual + taxaRegional) * 100) / 100;
+  const taxaSede25 = totalTaxasOficiais; // Mantido para compatibilidade de relatórios consolidados
 
-  // Total para a Sede no Resumo Diário
-  const totalSedeResumo = taxaSede25;
+  // Total para a Sede/Órgãos Superiores no Resumo Diário
+  const totalSedeResumo = totalTaxasOficiais;
 
-  // Totais de Saídas (incluindo a taxa de 25% da região)
+  // Totais de Saídas (incluindo as taxas oficiais)
   const manualExpensesSum = Math.round(expenses.reduce((sum, e) => sum + (e.amount || 0), 0) * 100) / 100;
-  const totalSaidasComTaxa = Math.round((manualExpensesSum + taxaSede25) * 100) / 100;
+  const totalSaidasComTaxa = Math.round((manualExpensesSum + totalTaxasOficiais) * 100) / 100;
 
   // Saldo Final do Mês = Total Arrecadado - Saídas
   const saldoFinalMes = Math.round((totalArrecadacao - totalSaidasComTaxa) * 100) / 100;
@@ -864,6 +871,10 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
           totalOfferingSpecial: totalOfferingSpecSum,
           totalMissions: totalMissionsSum,
           totalArrecadacao,
+          taxaNacional,
+          taxaEstadual,
+          taxaRegional,
+          totalTaxasOficiais,
           taxaSede25,
           totalExpenses: manualExpensesSum,
           totalSaidas: totalSaidasComTaxa,
@@ -969,15 +980,41 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
         });
       });
 
-      // Inserir Taxa da Região (25%) no Financeiro
-      if (taxaSede25 > 0) {
+      // Inserir Taxas Oficiais (Nacional 5,32%, Estadual 11,40%, Regional 4%) no Financeiro
+      if (taxaNacional > 0) {
         newTransactions.push({
           type: 'expense',
-          amount: taxaSede25,
+          amount: taxaNacional,
           date: `${currentYear}-${currentMonthNum}-28`,
-          description: `Taxa da Região/Sede (25%) - ${competenciaExtenso}`,
-          category: 'Taxa Regional Sede',
-          destination: 'Sede Regional IEQ',
+          description: `TAXA NACIONAL (5,32% SOBRE A ARRECADAÇÃO) - ${competenciaExtenso}`,
+          category: 'Taxa Nacional',
+          destination: 'Conselho Nacional IEQ',
+          createdBy: currentUid,
+          createdAt: serverTimestamp(),
+          refcMonth: selectedMonthYear
+        });
+      }
+      if (taxaEstadual > 0) {
+        newTransactions.push({
+          type: 'expense',
+          amount: taxaEstadual,
+          date: `${currentYear}-${currentMonthNum}-28`,
+          description: `TAXA ESTADUAL (11,40% SOBRE A ARRECADAÇÃO) - ${competenciaExtenso}`,
+          category: 'Taxa Estadual',
+          destination: 'Conselho Estadual IEQ',
+          createdBy: currentUid,
+          createdAt: serverTimestamp(),
+          refcMonth: selectedMonthYear
+        });
+      }
+      if (taxaRegional > 0) {
+        newTransactions.push({
+          type: 'expense',
+          amount: taxaRegional,
+          date: `${currentYear}-${currentMonthNum}-28`,
+          description: `TAXA REGIONAL (4% SOBRE A ARRECADAÇÃO) - ${competenciaExtenso}`,
+          category: 'Taxa Regional',
+          destination: 'Região Eclesiástica IEQ',
           createdBy: currentUid,
           createdAt: serverTimestamp(),
           refcMonth: selectedMonthYear
@@ -1119,7 +1156,9 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
     expenses.forEach(exp => {
       refcData.push([exp.date || '-', exp.description, '', '', '', fmtCurrency(exp.amount), '', '', '', '']);
     });
-    refcData.push(['-', 'TAXA REGIÃO (25%)', '', '', '', fmtCurrency(taxaSede25), '', '', '', '']);
+    refcData.push(['-', '(+) TAXA NACIONAL (5,32% SOBRE A ARRECADAÇÃO)', '', '', '', fmtCurrency(taxaNacional), '', '', '', '']);
+    refcData.push(['-', '(+) TAXA ESTADUAL (11,40% SOBRE A ARRECADAÇÃO)', '', '', '', fmtCurrency(taxaEstadual), '', '', '', '']);
+    refcData.push(['-', '(+) TAXA REGIONAL (4% SOBRE A ARRECADAÇÃO)', '', '', '', fmtCurrency(taxaRegional), '', '', '', '']);
     refcData.push(['', 'TOTAL DE SAÍDAS', '', '', '', fmtCurrency(totalSaidasComTaxa), '', '', '', '']);
 
     const wsRefc = XLSX.utils.aoa_to_sheet(refcData);
@@ -1155,9 +1194,11 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
     ]);
     entradasData.push(['', '', '', '', '', '']);
     entradasData.push(['SOMA GERAL', '', fmtCurrency(totalArrecadacao), '', '', '']);
-    entradasData.push(['TAXA (25%)', '', fmtCurrency(taxaSede25), '', '', '']);
+    entradasData.push(['(+) TAXA NACIONAL (5,32%)', '', fmtCurrency(taxaNacional), '', '', '']);
+    entradasData.push(['(+) TAXA ESTADUAL (11,40%)', '', fmtCurrency(taxaEstadual), '', '', '']);
+    entradasData.push(['(+) TAXA REGIONAL (4%)', '', fmtCurrency(taxaRegional), '', '', '']);
     entradasData.push(['OFERTA MISSÕES', '', fmtCurrency(totalMissionsSum), '', '', '']);
-    entradasData.push(['TOTAL SEDE', '', fmtCurrency(totalSedeResumo), '', '', '']);
+    entradasData.push(['TOTAL TAXAS', '', fmtCurrency(totalTaxasOficiais), '', '', '']);
 
     const wsEntradas = XLSX.utils.aoa_to_sheet(entradasData);
     XLSX.utils.book_append_sheet(wb, wsEntradas, 'Entradas');
@@ -1615,9 +1656,9 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
                   <td className="p-1.5 font-bold font-mono text-right border-r border-black bg-white">
                     {fmtCurrency(totalMissionsSum)}
                   </td>
-                  <td className="p-1.5 font-bold border-r border-black bg-zinc-50">SEDE (25%)</td>
+                  <td className="p-1.5 font-bold border-r border-black bg-zinc-50">TAXAS OFICIAIS (20,72%)</td>
                   <td className="p-1.5 font-bold font-mono text-right bg-white">
-                    {fmtCurrency(taxaSede25)}
+                    {fmtCurrency(totalTaxasOficiais)}
                   </td>
                 </tr>
                 <tr className="bg-zinc-100 font-bold">
@@ -1686,11 +1727,23 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
                     </td>
                   </tr>
                 ))}
-                {/* Taxa Região (25%) */}
+                {/* 1º Linha: TAXA NACIONAL (5,32% SOBRE A ARRECADAÇÃO) */}
                 <tr className="bg-zinc-50 font-bold">
                   <td className="p-1 border-r border-black text-center font-mono text-[11px]">-</td>
-                  <td className="p-1 border-r border-black">TAXA REGIÃO (25%)</td>
-                  <td className="p-1 text-right font-mono text-indigo-900">{fmtCurrency(taxaSede25)}</td>
+                  <td className="p-1 border-r border-black">(+) TAXA NACIONAL (5,32% SOBRE A ARRECADAÇÃO)</td>
+                  <td className="p-1 text-right font-mono text-indigo-900">{fmtCurrency(taxaNacional)}</td>
+                </tr>
+                {/* 2º Linha: TAXA ESTADUAL (11,40% SOBRE A ARRECADAÇÃO) */}
+                <tr className="bg-zinc-50 font-bold">
+                  <td className="p-1 border-r border-black text-center font-mono text-[11px]">-</td>
+                  <td className="p-1 border-r border-black">(+) TAXA ESTADUAL (11,40% SOBRE A ARRECADAÇÃO)</td>
+                  <td className="p-1 text-right font-mono text-indigo-900">{fmtCurrency(taxaEstadual)}</td>
+                </tr>
+                {/* 3º Linha: TAXA REGIONAL (4% SOBRE A ARRECADAÇÃO) */}
+                <tr className="bg-zinc-50 font-bold">
+                  <td className="p-1 border-r border-black text-center font-mono text-[11px]">-</td>
+                  <td className="p-1 border-r border-black">(+) TAXA REGIONAL (4% SOBRE A ARRECADAÇÃO)</td>
+                  <td className="p-1 text-right font-mono text-indigo-900">{fmtCurrency(taxaRegional)}</td>
                 </tr>
                 {/* Linhas vazias para preencher folha A4 com elegância */}
                 {Array.from({ length: Math.max(0, 6 - expenses.length) }).map((_, i) => (
@@ -1861,16 +1914,24 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
                     <td className="p-1 text-right font-mono font-bold text-blue-900">{fmtCurrency(totalArrecadacao)}</td>
                   </tr>
                   <tr className="border-b border-black">
-                    <td className="p-1 border-r border-black font-bold uppercase text-[10px]">TAXA (25%):</td>
-                    <td className="p-1 text-right font-mono font-bold text-indigo-900">{fmtCurrency(taxaSede25)}</td>
+                    <td className="p-1 border-r border-black font-bold uppercase text-[9px]">(+) TAXA NACIONAL (5,32%):</td>
+                    <td className="p-1 text-right font-mono font-bold text-indigo-900">{fmtCurrency(taxaNacional)}</td>
+                  </tr>
+                  <tr className="border-b border-black">
+                    <td className="p-1 border-r border-black font-bold uppercase text-[9px]">(+) TAXA ESTADUAL (11,40%):</td>
+                    <td className="p-1 text-right font-mono font-bold text-indigo-900">{fmtCurrency(taxaEstadual)}</td>
+                  </tr>
+                  <tr className="border-b border-black">
+                    <td className="p-1 border-r border-black font-bold uppercase text-[9px]">(+) TAXA REGIONAL (4%):</td>
+                    <td className="p-1 text-right font-mono font-bold text-indigo-900">{fmtCurrency(taxaRegional)}</td>
                   </tr>
                   <tr className="border-b border-black bg-zinc-50">
-                    <td className="p-1 border-r border-black font-bold uppercase text-[10px]">OFERTA MISSÕES:</td>
+                    <td className="p-1 border-r border-black font-bold uppercase text-[9px]">OFERTA MISSÕES:</td>
                     <td className="p-1 text-right font-mono font-bold text-emerald-900">{fmtCurrency(totalMissionsSum)}</td>
                   </tr>
                   <tr className="bg-zinc-100 font-bold">
-                    <td className="p-1 border-r border-black uppercase text-[10px]">TOTAL SEDE:</td>
-                    <td className="p-1 text-right font-mono">{fmtCurrency(totalSedeResumo)}</td>
+                    <td className="p-1 border-r border-black uppercase text-[9px]">TOTAL TAXAS:</td>
+                    <td className="p-1 text-right font-mono">{fmtCurrency(totalTaxasOficiais)}</td>
                   </tr>
                 </tbody>
               </table>

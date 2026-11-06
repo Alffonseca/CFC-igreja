@@ -26,6 +26,9 @@ interface ChurchSettings {
   qrCodeUrl?: string;
   titheMessage?: string;
   destinations?: string[];
+  pctTaxaNacional?: number;
+  pctTaxaEstadual?: number;
+  pctTaxaRegional?: number;
 }
 
 interface SettingsProps {
@@ -502,6 +505,75 @@ export default function Settings({ role }: SettingsProps) {
                 placeholder="Ex: 'Cada um dê conforme determinou em seu coração...' - 2 Coríntios 9:7"
                 rows={2}
               />
+            </div>
+
+            <div className="space-y-3 rounded-2xl border border-indigo-100 bg-indigo-50/40 p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-extrabold uppercase tracking-wider text-indigo-950">
+                    Alíquotas Oficiais das Taxas IEQ
+                  </h4>
+                  <p className="text-[11px] text-zinc-600">
+                    Percentuais calculados sobre a Arrecadação para conferência dos Boletos Oficiais.
+                  </p>
+                </div>
+                <span className="rounded-full bg-indigo-100 px-2.5 py-0.5 text-[10px] font-bold text-indigo-900">
+                  Total Taxas: {((Number(settings.pctTaxaNacional ?? 5.00) + Number(settings.pctTaxaEstadual ?? 11.0714) + Number(settings.pctTaxaRegional ?? 3.9143))).toFixed(2)}%
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                <div>
+                  <label className="text-[11px] font-bold uppercase text-amber-950 block mb-1">
+                    Taxa Nacional (%)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    min="0"
+                    max="100"
+                    value={settings.pctTaxaNacional !== undefined ? settings.pctTaxaNacional : 5.00}
+                    onChange={(e) => setSettings({ ...settings, pctTaxaNacional: parseFloat(e.target.value) || 0 })}
+                    className="w-full rounded-xl border border-amber-200 bg-white py-2 px-3 text-xs font-mono font-bold text-amber-950 outline-hidden transition-all focus:border-amber-600 focus:ring-2 focus:ring-amber-500/10"
+                    placeholder="5.00"
+                  />
+                  <span className="text-[10px] text-zinc-500 block mt-0.5">Padrão: 5,00% (+ 50% Missões)</span>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold uppercase text-indigo-950 block mb-1">
+                    Taxa Estadual (%)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    min="0"
+                    max="100"
+                    value={settings.pctTaxaEstadual !== undefined ? settings.pctTaxaEstadual : 11.0714}
+                    onChange={(e) => setSettings({ ...settings, pctTaxaEstadual: parseFloat(e.target.value) || 0 })}
+                    className="w-full rounded-xl border border-indigo-200 bg-white py-2 px-3 text-xs font-mono font-bold text-indigo-950 outline-hidden transition-all focus:border-indigo-600 focus:ring-2 focus:ring-indigo-500/10"
+                    placeholder="11.0714"
+                  />
+                  <span className="text-[10px] text-zinc-500 block mt-0.5">Padrão: 11,0714% (+ 50% Missões)</span>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold uppercase text-purple-950 block mb-1">
+                    Taxa Regional (%)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    min="0"
+                    max="100"
+                    value={settings.pctTaxaRegional !== undefined ? settings.pctTaxaRegional : 3.9143}
+                    onChange={(e) => setSettings({ ...settings, pctTaxaRegional: parseFloat(e.target.value) || 0 })}
+                    className="w-full rounded-xl border border-purple-200 bg-white py-2 px-3 text-xs font-mono font-bold text-purple-950 outline-hidden transition-all focus:border-purple-600 focus:ring-2 focus:ring-purple-500/10"
+                    placeholder="3.9143"
+                  />
+                  <span className="text-[10px] text-zinc-500 block mt-0.5">Padrão: 3,9143% (ou 4% nominal)</span>
+                </div>
+              </div>
             </div>
 
             <div className="space-y-2">

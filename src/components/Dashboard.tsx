@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { collection, query, onSnapshot, where, Timestamp, doc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { TrendingUp, TrendingDown, Wallet, DollarSign, Calendar, ChevronLeft, ChevronRight, Landmark, Building2, ShieldCheck, Percent } from 'lucide-react';
+import { TrendingUp, TrendingDown, Wallet, DollarSign, Calendar, ChevronLeft, ChevronRight, Landmark, Building2, ShieldCheck, Percent, PiggyBank, Coins } from 'lucide-react';
 import { motion } from 'motion/react';
 import { startOfMonth, endOfMonth, format, parse, addMonths, subMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -182,11 +182,69 @@ export default function Dashboard() {
   const totalTaxas = Math.round((taxaNacionalPura + taxaEstadualPura + taxaRegional) * 100) / 100;
   const totalBoletosOficiais = Math.round((boletoNacionalReal + boletoEstadualReal + boletoRegionalReal) * 100) / 100;
 
+  // Saldo Acumulado (soma de todos os meses de todo o histórico no sistema)
+  const allTimeTotals = transactions.reduce((acc, t) => {
+    const amt = typeof t.amount === 'number' ? t.amount : (parseFloat(String(t.amount)) || 0);
+    if (t.type === 'tithe') acc.tithes += amt;
+    if (t.type === 'offering') acc.offerings += amt;
+    if (t.type === 'expense') acc.expenses += amt;
+    return acc;
+  }, { tithes: 0, offerings: 0, expenses: 0 });
+
+  const accumulatedBalance = Math.round((allTimeTotals.tithes + allTimeTotals.offerings - allTimeTotals.expenses) * 100) / 100;
+
+  // Quantidade de meses com movimentação registrada no sistema
+  const recordedMonthsCount = new Set(
+    transactions.map(t => t.date ? t.date.substring(0, 7) : null).filter(Boolean)
+  ).size;
+
   const stats = [
-    { label: 'Dízimos', value: totals.tithes, icon: TrendingUp, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-    { label: 'Ofertas', value: totals.offerings, icon: TrendingUp, color: 'text-blue-600', bg: 'bg-blue-50' },
-    { label: 'Despesas', value: totals.expenses, icon: TrendingDown, color: 'text-rose-600', bg: 'bg-rose-50' },
-    { label: 'Saldo Mensal', value: balance, icon: Wallet, color: 'text-zinc-900', bg: 'bg-zinc-100' },
+    { 
+      label: 'Dízimos', 
+      sublabel: 'Mês selecionado',
+      value: totals.tithes, 
+      icon: TrendingUp, 
+      color: 'text-emerald-600', 
+      bg: 'bg-emerald-50',
+      badge: 'Mês'
+    },
+    { 
+      label: 'Ofertas', 
+      sublabel: 'Mês selecionado',
+      value: totals.offerings, 
+      icon: TrendingUp, 
+      color: 'text-blue-600', 
+      bg: 'bg-blue-50',
+      badge: 'Mês'
+    },
+    { 
+      label: 'Despesas', 
+      sublabel: 'Mês selecionado',
+      value: totals.expenses, 
+      icon: TrendingDown, 
+      color: 'text-rose-600', 
+      bg: 'bg-rose-50',
+      badge: 'Mês'
+    },
+    { 
+      label: 'Saldo Mensal', 
+      sublabel: 'Receitas - Despesas',
+      value: balance, 
+      icon: Wallet, 
+      color: balance >= 0 ? 'text-zinc-900' : 'text-rose-600', 
+      bg: balance >= 0 ? 'bg-zinc-100' : 'bg-rose-50',
+      badge: 'Mês'
+    },
+    { 
+      label: 'Saldo Acumulado', 
+      sublabel: recordedMonthsCount > 0 ? `Soma de ${recordedMonthsCount} ${recordedMonthsCount === 1 ? 'mês' : 'meses'}` : 'Todos os meses',
+      value: accumulatedBalance, 
+      icon: PiggyBank, 
+      color: accumulatedBalance >= 0 ? 'text-indigo-700' : 'text-rose-700', 
+      bg: accumulatedBalance >= 0 ? 'bg-indigo-50' : 'bg-rose-50',
+      badge: 'Total Geral',
+      isAccumulated: true
+    },
   ];
 
   const chartData = [
@@ -263,25 +321,37 @@ export default function Dashboard() {
         </div>
       </header>
 
-      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
         {stats.map((stat, i) => (
           <motion.div
             key={stat.label}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.1 }}
-            className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-zinc-200"
+            transition={{ delay: i * 0.08 }}
+            className={cn(
+              "rounded-2xl bg-white p-5 shadow-sm ring-1 ring-zinc-200 transition-all flex flex-col justify-between hover:shadow-md",
+              stat.isAccumulated && "ring-2 ring-indigo-500/40 bg-gradient-to-b from-white to-indigo-50/30"
+            )}
           >
             <div className="flex items-center justify-between">
-              <div className={cn("rounded-xl p-2", stat.bg)}>
-                <stat.icon className={stat.color} size={24} />
+              <div className={cn("rounded-xl p-2.5", stat.bg)}>
+                <stat.icon className={stat.color} size={22} />
               </div>
+              <span className={cn(
+                "text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider",
+                stat.isAccumulated 
+                  ? "bg-indigo-100 text-indigo-800 ring-1 ring-indigo-200"
+                  : "bg-zinc-100 text-zinc-600"
+              )}>
+                {stat.badge}
+              </span>
             </div>
-            <div className="mt-4">
-              <p className="text-sm font-medium text-zinc-500">{stat.label}</p>
-              <p className={cn("text-2xl font-bold", stat.color)}>
+            <div className="mt-3.5">
+              <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">{stat.label}</p>
+              <p className={cn("text-xl sm:text-2xl font-extrabold font-mono tracking-tight mt-0.5", stat.color)}>
                 {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(stat.value)}
               </p>
+              <p className="text-[11px] text-zinc-400 mt-1 font-medium">{stat.sublabel}</p>
             </div>
           </motion.div>
         ))}

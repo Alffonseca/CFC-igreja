@@ -71,7 +71,12 @@ Ao iniciar um novo projeto no AI Studio, você pode usar este arquivo como rotei
     - Resumo da folha de Entradas;
     - Sincronização automática com os lançamentos de saída do Caixa Geral;
     - Cards de conferência de Boletos no Menu Principal (`Dashboard.tsx`);
-    - Tela de Configurações (`Settings.tsx`) com campos para editar as alíquotas se necessário.
-
-
-
+- **Novo Card de Saldo Acumulado no Painel Geral (`Dashboard.tsx`):**
+  - Adicionado card dedicado "Saldo Acumulado" somando os saldos de todas as movimentações financeiras de todos os meses cadastrados no histórico da igreja (`(Dízimos Totais + Ofertas Totais) - Despesas Totais`).
+  - O painel agora apresenta de forma clara e comparativa:
+    1. **Dízimos** (do mês selecionado);
+    2. **Ofertas** (do mês selecionado);
+    3. **Despesas** (do mês selecionado);
+    4. **Saldo Mensal** (resultado líquido apenas do mês selecionado);
+    5. **Saldo Acumulado** (caixa geral total acumulado de todos os meses históricos).
+  - Inclui indicação visual da quantidade de meses apurados e destaque de caixa.

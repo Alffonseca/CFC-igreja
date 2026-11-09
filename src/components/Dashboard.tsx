@@ -22,10 +22,14 @@ interface RefcReportTotals {
   taxaEstadual?: number;
   taxaRegional?: number;
   totalTaxasOficiais?: number;
+  totalBoletosOficiais?: number;
   totalTithes?: number;
   totalOfferingGeneral?: number;
   totalOfferingSpecial?: number;
   totalMissions?: number;
+  totalExpenses?: number;
+  totalSaidas?: number;
+  saldoFinal?: number;
 }
 
 export default function Dashboard() {
@@ -40,6 +44,7 @@ export default function Dashboard() {
     pctTaxaRegional?: number;
   } | null>(null);
   const [refcTotals, setRefcTotals] = useState<RefcReportTotals | null>(null);
+  const [refcData, setRefcData] = useState<any | null>(null);
 
   // Mês selecionado (persiste e sincroniza com os relatórios e REFC)
   const [selectedMonthYear, setSelectedMonthYear] = useState<string>(() => {
@@ -80,9 +85,16 @@ export default function Dashboard() {
 
     // Escuta o relatório oficial consolidado do mês (REFC)
     const unsubscribeRefc = onSnapshot(doc(db, 'refc_reports', selectedMonthYear), (rDoc) => {
-      if (rDoc.exists() && rDoc.data()?.totals) {
-        setRefcTotals(rDoc.data().totals as RefcReportTotals);
+      if (rDoc.exists()) {
+        const d = rDoc.data();
+        setRefcData(d);
+        if (d?.totals) {
+          setRefcTotals(d.totals as RefcReportTotals);
+        } else {
+          setRefcTotals(null);
+        }
       } else {
+        setRefcData(null);
         setRefcTotals(null);
       }
     });
@@ -182,6 +194,43 @@ export default function Dashboard() {
   const totalTaxas = Math.round((taxaNacionalPura + taxaEstadualPura + taxaRegional) * 100) / 100;
   const totalBoletosOficiais = Math.round((boletoNacionalReal + boletoEstadualReal + boletoRegionalReal) * 100) / 100;
 
+  // Despesas Operacionais manuais salvas no REFC (Água, Luz, Sustento...)
+  const refcManualExpenses = refcData?.expenses && Array.isArray(refcData.expenses)
+    ? Math.round(refcData.expenses.reduce((sum: number, e: any) => sum + (Number(e.amount) || 0), 0) * 100) / 100
+    : (refcTotals?.totalExpenses || 0);
+
+  // Total de Saídas do REFC = Despesas Operacionais + Boletos Bancários Oficiais (R$ 953,34)
+  const refcTotalSaidasCalculado = Math.round((refcManualExpenses + totalBoletosOficiais) * 100) / 100;
+  
+  // Total oficial de saídas do REFC
+  const refcTotalSaidas = refcTotals?.totalSaidas !== undefined && refcTotals.totalSaidas > 0
+    ? Number(refcTotals.totalSaidas)
+    : refcTotalSaidasCalculado;
+
+  // Verifica se o mês atual possui lançamentos ou REFC ativo
+  const mesTemRefc = Boolean(
+    (refcData && (refcData.expenses?.length > 0 || refcData.dailyEntries?.length > 0)) ||
+    (refcTotals && (refcTotals.totalArrecadacao || refcTotals.totalSaidas))
+  );
+
+  // Valor oficial do card de Despesas:
+  // Se o mês tem dados no REFC, sincroniza EXATAMENTE com o Total Geral de Saídas do REFC!
+  const displayExpenses = mesTemRefc ? refcTotalSaidas : totals.expenses;
+
+  // Dízimos oficiais do mês (prioriza REFC se cadastrado)
+  const displayTithes = (refcTotals?.totalTithes !== undefined && refcTotals.totalTithes > 0)
+    ? Number(refcTotals.totalTithes)
+    : totals.tithes;
+
+  // Ofertas oficiais do mês (soma de ofertas do REFC, incluindo missões)
+  const refcTotalOfertas = (refcTotals?.totalOfferingGeneral !== undefined || refcTotals?.totalOfferingSpecial !== undefined)
+    ? Math.round(((Number(refcTotals?.totalOfferingGeneral) || 0) + (Number(refcTotals?.totalOfferingSpecial) || 0) + (Number(refcTotals?.totalMissions) || 0)) * 100) / 100
+    : 0;
+  const displayOfferings = refcTotalOfertas > 0 ? refcTotalOfertas : totals.offerings;
+
+  // Saldo do Mês = (Dízimos + Ofertas) - Despesas (bate 100% com o REFC!)
+  const displayBalance = Math.round((displayTithes + displayOfferings - displayExpenses) * 100) / 100;
+
   // Saldo Acumulado (soma de todos os meses de todo o histórico no sistema)
   const allTimeTotals = transactions.reduce((acc, t) => {
     const amt = typeof t.amount === 'number' ? t.amount : (parseFloat(String(t.amount)) || 0);
@@ -202,7 +251,7 @@ export default function Dashboard() {
     { 
       label: 'Dízimos', 
       sublabel: 'Mês selecionado',
-      value: totals.tithes, 
+      value: displayTithes, 
       icon: TrendingUp, 
       color: 'text-emerald-600', 
       bg: 'bg-emerald-50',
@@ -211,7 +260,7 @@ export default function Dashboard() {
     { 
       label: 'Ofertas', 
       sublabel: 'Mês selecionado',
-      value: totals.offerings, 
+      value: displayOfferings, 
       icon: TrendingUp, 
       color: 'text-blue-600', 
       bg: 'bg-blue-50',
@@ -219,8 +268,8 @@ export default function Dashboard() {
     },
     { 
       label: 'Despesas', 
-      sublabel: 'Mês selecionado',
-      value: totals.expenses, 
+      sublabel: mesTemRefc ? 'Total Geral Saídas' : 'Mês selecionado',
+      value: displayExpenses, 
       icon: TrendingDown, 
       color: 'text-rose-600', 
       bg: 'bg-rose-50',
@@ -228,11 +277,11 @@ export default function Dashboard() {
     },
     { 
       label: 'Saldo Mensal', 
-      sublabel: 'Receitas - Despesas',
-      value: balance, 
+      sublabel: 'Receitas - Saídas',
+      value: displayBalance, 
       icon: Wallet, 
-      color: balance >= 0 ? 'text-zinc-900' : 'text-rose-600', 
-      bg: balance >= 0 ? 'bg-zinc-100' : 'bg-rose-50',
+      color: displayBalance >= 0 ? 'text-zinc-900' : 'text-rose-600', 
+      bg: displayBalance >= 0 ? 'bg-zinc-100' : 'bg-rose-50',
       badge: 'Mês'
     },
     { 
@@ -248,9 +297,9 @@ export default function Dashboard() {
   ];
 
   const chartData = [
-    { name: 'Dízimos', value: totals.tithes, color: '#10b981' },
-    { name: 'Ofertas', value: totals.offerings, color: '#3b82f6' },
-    { name: 'Despesas', value: totals.expenses, color: '#f43f5e' },
+    { name: 'Dízimos', value: displayTithes, color: '#10b981' },
+    { name: 'Ofertas', value: displayOfferings, color: '#3b82f6' },
+    { name: 'Despesas', value: displayExpenses, color: '#f43f5e' },
   ].filter(item => item.value > 0);
 
   const formatCurrency = (val: number) => {

@@ -80,3 +80,7 @@ Ao iniciar um novo projeto no AI Studio, você pode usar este arquivo como rotei
     4. **Saldo Mensal** (resultado líquido apenas do mês selecionado);
     5. **Saldo Acumulado** (caixa geral total acumulado de todos os meses históricos).
   - Inclui indicação visual da quantidade de meses apurados e destaque de caixa.
+- **Sincronização Exata dos Boletos no Financeiro e Unificação com o Painel Geral:**
+  - O card de **Despesas** no Painel Geral (`Dashboard.tsx`) agora está 100% sincronizado com o **Total Geral de Saídas do Mês** do REFC (`RefcEntryForm.tsx` e `QuadrangularReport.tsx`).
+  - O valor dos boletos na planilha de saídas do REFC e no relatório impresso/Excel passou a exibir o valor real a pagar (com o repasse de 50% de Missões nos boletos Nacional e Estadual: R$ 246,00 e R$ 526,50), garantindo que a soma dos boletos (R$ 953,34) + contas de consumo (água, luz, etc.) bata com exatidão tanto no formulário de lançamentos quanto no card do painel principal.
+  - A função de auto-salvamento das despesas agora grava os totais consolidados no Firestore em tempo real.

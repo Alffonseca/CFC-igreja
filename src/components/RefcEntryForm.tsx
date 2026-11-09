@@ -482,19 +482,32 @@ export default function RefcEntryForm() {
   // Oferta de Missões NÃO entra no cálculo da arrecadação geral, aparece apenas no seu campo próprio
   const totalArrecadacao = Math.round((totalTithesSum + totalOfferingGenSum + totalOfferingSpecSum) * 100) / 100;
   
-  // Taxas Oficiais sobre a Arrecadação:
+  // 50% de Missões do 3º Domingo para o Boleto Nacional e 50% para o Boleto Estadual
+  const metadeMissoes = Math.round((totalMissionsSum / 2) * 100) / 100;
+
+  // Taxas Oficiais Puras sobre a Arrecadação:
   // 1º Linha: TAXA NACIONAL (5,00%)
   // 2º Linha: TAXA ESTADUAL (11,0714%)
   // 3º Linha: TAXA REGIONAL (3,9143%)
   const taxaNacional = Math.round((totalArrecadacao * 0.0500) * 100) / 100;
   const taxaEstadual = Math.round((totalArrecadacao * 0.1107142857) * 100) / 100;
   const taxaRegional = Math.round((totalArrecadacao * 0.0391428571) * 100) / 100;
-  const totalTaxasOficiais = Math.round((taxaNacional + taxaEstadual + taxaRegional) * 100) / 100;
-  const taxaSede25 = totalTaxasOficiais; // Mantido para retrocompatibilidade com relatórios consolidados
+
+  // Valores Reais dos Boletos a Pagar (Boleto Nacional = Taxa + 50% Missões; Boleto Estadual = Taxa + 50% Missões):
+  const boletoNacional = Math.round((taxaNacional + metadeMissoes) * 100) / 100;
+  const boletoEstadual = Math.round((taxaEstadual + metadeMissoes) * 100) / 100;
+  const boletoRegional = taxaRegional;
+  const totalBoletosOficiais = Math.round((boletoNacional + boletoEstadual + boletoRegional) * 100) / 100;
+
+  const totalTaxasOficiais = totalBoletosOficiais; // Sincronizado para que o total de saídas reflita os boletos reais a pagar
+  const taxaSede25 = totalTaxasOficiais;
 
   const manualExpensesSum = Math.round(expenses.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0) * 100) / 100;
-  const totalSaidasComTaxa = Math.round((totalTaxasOficiais + manualExpensesSum) * 100) / 100;
-  const saldoFinalMes = Math.round((totalArrecadacao - totalSaidasComTaxa) * 100) / 100;
+  const totalSaidasComTaxa = Math.round((totalBoletosOficiais + manualExpensesSum) * 100) / 100;
+
+  // Entradas Totais em Caixa = Arrecadação (Dízimos + Ofertas Gerais + Ofertas Especiais) + Oferta de Missões
+  const totalEntradasComMissoes = Math.round((totalArrecadacao + totalMissionsSum) * 100) / 100;
+  const saldoFinalMes = Math.round((totalEntradasComMissoes - totalSaidasComTaxa) * 100) / 100;
 
   const [currentYear, currentMonthNum] = selectedMonthYear.split('-');
   const dateObj = new Date(parseInt(currentYear, 10), parseInt(currentMonthNum, 10) - 1, 1);
@@ -660,8 +673,26 @@ export default function RefcEntryForm() {
   const persistExpensesToFirestore = async (newExpensesList: ExpenseEntry[]) => {
     if (!auth.currentUser) return;
     try {
+      const manualSum = Math.round(newExpensesList.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0) * 100) / 100;
+      const totalSaidasCalculado = Math.round((totalBoletosOficiais + manualSum) * 100) / 100;
       await setDoc(doc(db, 'refc_reports', selectedMonthYear), {
         expenses: newExpensesList,
+        totals: {
+          totalTithes: totalTithesSum,
+          totalOfferingGeneral: totalOfferingGenSum,
+          totalOfferingSpecial: totalOfferingSpecSum,
+          totalMissions: totalMissionsSum,
+          totalArrecadacao,
+          taxaNacional,
+          taxaEstadual,
+          taxaRegional,
+          totalTaxasOficiais,
+          totalBoletosOficiais,
+          taxaSede25,
+          totalExpenses: manualSum,
+          totalSaidas: totalSaidasCalculado,
+          saldoFinal: Math.round(((totalArrecadacao + totalMissionsSum) - totalSaidasCalculado) * 100) / 100
+        },
         updatedAt: serverTimestamp()
       }, { merge: true });
     } catch (err) {
@@ -961,13 +992,19 @@ export default function RefcEntryForm() {
         }
       });
 
-      // Inserir Taxas Oficiais no Financeiro (Nacional 5,00%, Estadual 11,0714%, Regional 3,9143%)
-      if (taxaNacional > 0) {
+      // Metade de Missões para os boletos Nacional e Estadual (50% cada)
+      const metadeMissoesSync = Math.round((totalMissionsSum / 2) * 100) / 100;
+      const valorBoletoNacional = Math.round((taxaNacional + metadeMissoesSync) * 100) / 100;
+      const valorBoletoEstadual = Math.round((taxaEstadual + metadeMissoesSync) * 100) / 100;
+      const valorBoletoRegional = taxaRegional;
+
+      // Inserir Boletos Oficiais no Financeiro (Nacional, Estadual e Regional com valores reais dos boletos a pagar)
+      if (valorBoletoNacional > 0) {
         newTransactions.push({
           type: 'expense',
-          amount: taxaNacional,
+          amount: valorBoletoNacional,
           date: `${currentYear}-${currentMonthNum}-28`,
-          description: `TAXA NACIONAL (5,00% SOBRE A ARRECADAÇÃO) - ${competenciaExtenso}`,
+          description: `BOLETO NACIONAL (Taxa 5,00% + 50% Missões) - ${competenciaExtenso}`,
           category: 'Taxa Nacional',
           destination: 'Conselho Nacional IEQ',
           createdBy: currentUid,
@@ -975,12 +1012,12 @@ export default function RefcEntryForm() {
           refcMonth: selectedMonthYear
         });
       }
-      if (taxaEstadual > 0) {
+      if (valorBoletoEstadual > 0) {
         newTransactions.push({
           type: 'expense',
-          amount: taxaEstadual,
+          amount: valorBoletoEstadual,
           date: `${currentYear}-${currentMonthNum}-28`,
-          description: `TAXA ESTADUAL (11,0714% SOBRE A ARRECADAÇÃO) - ${competenciaExtenso}`,
+          description: `BOLETO ESTADUAL (Taxa 11,0714% + 50% Missões) - ${competenciaExtenso}`,
           category: 'Taxa Estadual',
           destination: 'Conselho Estadual IEQ',
           createdBy: currentUid,
@@ -988,12 +1025,12 @@ export default function RefcEntryForm() {
           refcMonth: selectedMonthYear
         });
       }
-      if (taxaRegional > 0) {
+      if (valorBoletoRegional > 0) {
         newTransactions.push({
           type: 'expense',
-          amount: taxaRegional,
+          amount: valorBoletoRegional,
           date: `${currentYear}-${currentMonthNum}-28`,
-          description: `TAXA REGIONAL (3,9143% SOBRE A ARRECADAÇÃO) - ${competenciaExtenso}`,
+          description: `BOLETO REGIONAL (Taxa 3,9143%) - ${competenciaExtenso}`,
           category: 'Taxa Regional',
           destination: 'Região Eclesiástica IEQ',
           createdBy: currentUid,
@@ -1448,53 +1485,68 @@ export default function RefcEntryForm() {
                 );
               })}
 
-              {/* 1º Linha: TAXA NACIONAL (5,00% SOBRE A ARRECADAÇÃO) */}
+              {/* 1º Linha: BOLETO NACIONAL (Taxa 5,00% + 50% Missões) */}
               <tr className="bg-amber-50/60 font-bold border-t border-amber-200">
                 <td className="p-2.5 font-mono text-zinc-700">-</td>
                 <td className="p-2.5 text-zinc-950 uppercase">
-                  (+) TAXA NACIONAL (5,00% SOBRE A ARRECADAÇÃO)
+                  <div>
+                    <span>(+) BOLETO NACIONAL (5,00% SOBRE A ARRECADAÇÃO {metadeMissoes > 0 ? '+ 50% MISSÕES' : ''})</span>
+                    <span className="block text-[11px] font-normal text-amber-900/80 font-mono">
+                      Taxa (5,00%): {fmtCurrency(taxaNacional)} {metadeMissoes > 0 ? `+ Repasse Missões: ${fmtCurrency(metadeMissoes)}` : ''}
+                    </span>
+                  </div>
                 </td>
                 <td className="p-2.5 text-center">
                   <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900">
-                    Fixa (5,00% Automático)
+                    Boleto Bancário Real
                   </span>
                 </td>
-                <td className="p-2.5 text-right font-mono text-amber-900 text-sm">
-                  {fmtCurrency(taxaNacional)}
+                <td className="p-2.5 text-right font-mono text-amber-950 text-sm font-extrabold">
+                  {fmtCurrency(boletoNacional)}
                 </td>
                 <td className="p-2.5 text-center text-zinc-400 text-[10px] font-mono">Auto</td>
               </tr>
 
-              {/* 2º Linha: TAXA ESTADUAL (11,0714% SOBRE A ARRECADAÇÃO) */}
+              {/* 2º Linha: BOLETO ESTADUAL (Taxa 11,0714% + 50% Missões) */}
               <tr className="bg-amber-50/60 font-bold border-t border-amber-200">
                 <td className="p-2.5 font-mono text-zinc-700">-</td>
                 <td className="p-2.5 text-zinc-950 uppercase">
-                  (+) TAXA ESTADUAL (11,0714% SOBRE A ARRECADAÇÃO)
+                  <div>
+                    <span>(+) BOLETO ESTADUAL (11,0714% SOBRE A ARRECADAÇÃO {metadeMissoes > 0 ? '+ 50% MISSÕES' : ''})</span>
+                    <span className="block text-[11px] font-normal text-amber-900/80 font-mono">
+                      Taxa (11,0714%): {fmtCurrency(taxaEstadual)} {metadeMissoes > 0 ? `+ Repasse Missões: ${fmtCurrency(metadeMissoes)}` : ''}
+                    </span>
+                  </div>
                 </td>
                 <td className="p-2.5 text-center">
                   <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900">
-                    Fixa (11,0714% Automático)
+                    Boleto Bancário Real
                   </span>
                 </td>
-                <td className="p-2.5 text-right font-mono text-amber-900 text-sm">
-                  {fmtCurrency(taxaEstadual)}
+                <td className="p-2.5 text-right font-mono text-amber-950 text-sm font-extrabold">
+                  {fmtCurrency(boletoEstadual)}
                 </td>
                 <td className="p-2.5 text-center text-zinc-400 text-[10px] font-mono">Auto</td>
               </tr>
 
-              {/* 3º Linha: TAXA REGIONAL (3,9143% SOBRE A ARRECADAÇÃO) */}
+              {/* 3º Linha: BOLETO REGIONAL (Taxa 3,9143%) */}
               <tr className="bg-amber-50/60 font-bold border-t border-amber-200">
                 <td className="p-2.5 font-mono text-zinc-700">-</td>
                 <td className="p-2.5 text-zinc-950 uppercase">
-                  (+) TAXA REGIONAL (3,9143% SOBRE A ARRECADAÇÃO)
+                  <div>
+                    <span>(+) BOLETO REGIONAL (3,9143% SOBRE A ARRECADAÇÃO)</span>
+                    <span className="block text-[11px] font-normal text-amber-900/80 font-mono">
+                      Taxa (3,9143%): {fmtCurrency(taxaRegional)}
+                    </span>
+                  </div>
                 </td>
                 <td className="p-2.5 text-center">
                   <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900">
-                    Fixa (3,9143% Automático)
+                    Boleto Bancário Real
                   </span>
                 </td>
-                <td className="p-2.5 text-right font-mono text-amber-900 text-sm">
-                  {fmtCurrency(taxaRegional)}
+                <td className="p-2.5 text-right font-mono text-amber-950 text-sm font-extrabold">
+                  {fmtCurrency(boletoRegional)}
                 </td>
                 <td className="p-2.5 text-center text-zinc-400 text-[10px] font-mono">Auto</td>
               </tr>
@@ -1507,30 +1559,16 @@ export default function RefcEntryForm() {
                 <td className="p-2.5 text-right font-mono text-zinc-900">{fmtCurrency(manualExpensesSum)}</td>
                 <td></td>
               </tr>
-              <tr className="border-b border-zinc-200">
-                <td colSpan={3} className="p-2.5 text-amber-900 uppercase">
-                  (+) TAXA NACIONAL (5,00% SOBRE A ARRECADAÇÃO):
+              <tr className="border-b border-zinc-200 bg-amber-50/40">
+                <td colSpan={3} className="p-2.5 text-amber-950 uppercase font-bold">
+                  (+) Subtotal Boletos da Sede a Pagar (Nacional + Estadual + Regional):
                 </td>
-                <td className="p-2.5 text-right font-mono text-amber-900">{fmtCurrency(taxaNacional)}</td>
-                <td></td>
-              </tr>
-              <tr className="border-b border-zinc-200">
-                <td colSpan={3} className="p-2.5 text-amber-900 uppercase">
-                  (+) TAXA ESTADUAL (11,0714% SOBRE A ARRECADAÇÃO):
-                </td>
-                <td className="p-2.5 text-right font-mono text-amber-900">{fmtCurrency(taxaEstadual)}</td>
-                <td></td>
-              </tr>
-              <tr className="border-b border-zinc-200">
-                <td colSpan={3} className="p-2.5 text-amber-900 uppercase">
-                  (+) TAXA REGIONAL (3,9143% SOBRE A ARRECADAÇÃO):
-                </td>
-                <td className="p-2.5 text-right font-mono text-amber-900">{fmtCurrency(taxaRegional)}</td>
+                <td className="p-2.5 text-right font-mono text-amber-950 font-extrabold">{fmtCurrency(totalBoletosOficiais)}</td>
                 <td></td>
               </tr>
               <tr className="bg-rose-50/70 border-b-2 border-rose-200">
                 <td colSpan={3} className="p-2.5 text-rose-950 uppercase font-extrabold">
-                  (=) Total Geral de Saídas do Mês:
+                  (=) Total Geral de Saídas do Mês (Contas + Boletos a Pagar):
                 </td>
                 <td className="p-2.5 text-right font-mono text-rose-800 text-sm font-extrabold">{fmtCurrency(totalSaidasComTaxa)}</td>
                 <td></td>

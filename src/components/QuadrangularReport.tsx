@@ -617,24 +617,36 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
   const totalArrecadacao = Math.round((totalTithesSum + totalOfferingGenSum + totalOfferingSpecSum) * 100) / 100;
 
   // Taxas Oficiais sobre a Arrecadação:
-  // 1º Linha: TAXA NACIONAL (5,00% SOBRE A ARRECADAÇÃO)
-  // 2º Linha: TAXA ESTADUAL (11,0714% SOBRE A ARRECADAÇÃO)
-  // 3º Linha: TAXA REGIONAL (3,9143% SOBRE A ARRECADAÇÃO)
+  // 50% de Missões do 3º Domingo para o Boleto Nacional e 50% para o Boleto Estadual
+  const metadeMissoes = Math.round((totalMissionsSum / 2) * 100) / 100;
+
+  // Taxas Oficiais sobre a Arrecadação:
+  // 1º Linha: TAXA NACIONAL (5,00%)
+  // 2º Linha: TAXA ESTADUAL (11,0714%)
+  // 3º Linha: TAXA REGIONAL (3,9143%)
   const taxaNacional = Math.round((totalArrecadacao * 0.0500) * 100) / 100;
   const taxaEstadual = Math.round((totalArrecadacao * 0.1107142857) * 100) / 100;
   const taxaRegional = Math.round((totalArrecadacao * 0.0391428571) * 100) / 100;
-  const totalTaxasOficiais = Math.round((taxaNacional + taxaEstadual + taxaRegional) * 100) / 100;
-  const taxaSede25 = totalTaxasOficiais; // Mantido para compatibilidade de relatórios consolidados
+
+  // Boletos Reais a Pagar (Boleto Nacional = Taxa + 50% Missões; Boleto Estadual = Taxa + 50% Missões):
+  const boletoNacional = Math.round((taxaNacional + metadeMissoes) * 100) / 100;
+  const boletoEstadual = Math.round((taxaEstadual + metadeMissoes) * 100) / 100;
+  const boletoRegional = taxaRegional;
+  const totalBoletosOficiais = Math.round((boletoNacional + boletoEstadual + boletoRegional) * 100) / 100;
+
+  const totalTaxasOficiais = totalBoletosOficiais; // Sincronizado para refletir o total exato dos boletos a pagar
+  const taxaSede25 = totalTaxasOficiais;
 
   // Total para a Sede/Órgãos Superiores no Resumo Diário
   const totalSedeResumo = totalTaxasOficiais;
 
-  // Totais de Saídas (incluindo as taxas oficiais)
+  // Totais de Saídas (incluindo os boletos oficiais a pagar)
   const manualExpensesSum = Math.round(expenses.reduce((sum, e) => sum + (e.amount || 0), 0) * 100) / 100;
-  const totalSaidasComTaxa = Math.round((manualExpensesSum + totalTaxasOficiais) * 100) / 100;
+  const totalSaidasComTaxa = Math.round((manualExpensesSum + totalBoletosOficiais) * 100) / 100;
 
-  // Saldo Final do Mês = Total Arrecadado - Saídas
-  const saldoFinalMes = Math.round((totalArrecadacao - totalSaidasComTaxa) * 100) / 100;
+  // Saldo Final do Mês = (Total Arrecadado + Oferta de Missões) - Saídas (Despesas + Boletos a Pagar)
+  const totalEntradasCaixa = Math.round((totalArrecadacao + totalMissionsSum) * 100) / 100;
+  const saldoFinalMes = Math.round((totalEntradasCaixa - totalSaidasComTaxa) * 100) / 100;
 
   // Manipular Despesas
   const handleAddExpense = () => {
@@ -980,13 +992,19 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
         });
       });
 
-      // Inserir Taxas Oficiais (Nacional 5,00%, Estadual 11,0714%, Regional 3,9143%) no Financeiro
-      if (taxaNacional > 0) {
+      // Metade de Missões para os boletos Nacional e Estadual (50% cada)
+      const metadeMissoesSync = Math.round((totalMissionsSum / 2) * 100) / 100;
+      const valorBoletoNacional = Math.round((taxaNacional + metadeMissoesSync) * 100) / 100;
+      const valorBoletoEstadual = Math.round((taxaEstadual + metadeMissoesSync) * 100) / 100;
+      const valorBoletoRegional = taxaRegional;
+
+      // Inserir Boletos Oficiais (Nacional, Estadual e Regional com valores reais dos boletos a pagar) no Financeiro
+      if (valorBoletoNacional > 0) {
         newTransactions.push({
           type: 'expense',
-          amount: taxaNacional,
+          amount: valorBoletoNacional,
           date: `${currentYear}-${currentMonthNum}-28`,
-          description: `TAXA NACIONAL (5,00% SOBRE A ARRECADAÇÃO) - ${competenciaExtenso}`,
+          description: `BOLETO NACIONAL (Taxa 5,00% + 50% Missões) - ${competenciaExtenso}`,
           category: 'Taxa Nacional',
           destination: 'Conselho Nacional IEQ',
           createdBy: currentUid,
@@ -994,12 +1012,12 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
           refcMonth: selectedMonthYear
         });
       }
-      if (taxaEstadual > 0) {
+      if (valorBoletoEstadual > 0) {
         newTransactions.push({
           type: 'expense',
-          amount: taxaEstadual,
+          amount: valorBoletoEstadual,
           date: `${currentYear}-${currentMonthNum}-28`,
-          description: `TAXA ESTADUAL (11,0714% SOBRE A ARRECADAÇÃO) - ${competenciaExtenso}`,
+          description: `BOLETO ESTADUAL (Taxa 11,0714% + 50% Missões) - ${competenciaExtenso}`,
           category: 'Taxa Estadual',
           destination: 'Conselho Estadual IEQ',
           createdBy: currentUid,
@@ -1007,12 +1025,12 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
           refcMonth: selectedMonthYear
         });
       }
-      if (taxaRegional > 0) {
+      if (valorBoletoRegional > 0) {
         newTransactions.push({
           type: 'expense',
-          amount: taxaRegional,
+          amount: valorBoletoRegional,
           date: `${currentYear}-${currentMonthNum}-28`,
-          description: `TAXA REGIONAL (3,9143% SOBRE A ARRECADAÇÃO) - ${competenciaExtenso}`,
+          description: `BOLETO REGIONAL (Taxa 3,9143%) - ${competenciaExtenso}`,
           category: 'Taxa Regional',
           destination: 'Região Eclesiástica IEQ',
           createdBy: currentUid,
@@ -1156,9 +1174,9 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
     expenses.forEach(exp => {
       refcData.push([exp.date || '-', exp.description, '', '', '', fmtCurrency(exp.amount), '', '', '', '']);
     });
-    refcData.push(['-', '(+) TAXA NACIONAL (5,00% SOBRE A ARRECADAÇÃO)', '', '', '', fmtCurrency(taxaNacional), '', '', '', '']);
-    refcData.push(['-', '(+) TAXA ESTADUAL (11,0714% SOBRE A ARRECADAÇÃO)', '', '', '', fmtCurrency(taxaEstadual), '', '', '', '']);
-    refcData.push(['-', '(+) TAXA REGIONAL (3,9143% SOBRE A ARRECADAÇÃO)', '', '', '', fmtCurrency(taxaRegional), '', '', '', '']);
+    refcData.push(['-', '(+) BOLETO NACIONAL (Taxa 5,00% + 50% Missões)', '', '', '', fmtCurrency(boletoNacional), '', '', '', '']);
+    refcData.push(['-', '(+) BOLETO ESTADUAL (Taxa 11,0714% + 50% Missões)', '', '', '', fmtCurrency(boletoEstadual), '', '', '', '']);
+    refcData.push(['-', '(+) BOLETO REGIONAL (Taxa 3,9143%)', '', '', '', fmtCurrency(boletoRegional), '', '', '', '']);
     refcData.push(['', 'TOTAL DE SAÍDAS', '', '', '', fmtCurrency(totalSaidasComTaxa), '', '', '', '']);
 
     const wsRefc = XLSX.utils.aoa_to_sheet(refcData);
@@ -1727,23 +1745,27 @@ export default function QuadrangularReport({ role }: { role: string | null }) {
                     </td>
                   </tr>
                 ))}
-                {/* 1º Linha: TAXA NACIONAL (5,00% SOBRE A ARRECADAÇÃO) */}
+                {/* 1º Linha: BOLETO NACIONAL (Taxa 5,00% + 50% Missões) */}
                 <tr className="bg-zinc-50 font-bold">
                   <td className="p-1 border-r border-black text-center font-mono text-[11px]">-</td>
-                  <td className="p-1 border-r border-black">(+) TAXA NACIONAL (5,00% SOBRE A ARRECADAÇÃO)</td>
-                  <td className="p-1 text-right font-mono text-indigo-900">{fmtCurrency(taxaNacional)}</td>
+                  <td className="p-1 border-r border-black">
+                    (+) BOLETO NACIONAL (5,00% {metadeMissoes > 0 ? '+ 50% MISSÕES' : ''})
+                  </td>
+                  <td className="p-1 text-right font-mono text-indigo-900 font-extrabold">{fmtCurrency(boletoNacional)}</td>
                 </tr>
-                {/* 2º Linha: TAXA ESTADUAL (11,0714% SOBRE A ARRECADAÇÃO) */}
+                {/* 2º Linha: BOLETO ESTADUAL (Taxa 11,0714% + 50% Missões) */}
                 <tr className="bg-zinc-50 font-bold">
                   <td className="p-1 border-r border-black text-center font-mono text-[11px]">-</td>
-                  <td className="p-1 border-r border-black">(+) TAXA ESTADUAL (11,0714% SOBRE A ARRECADAÇÃO)</td>
-                  <td className="p-1 text-right font-mono text-indigo-900">{fmtCurrency(taxaEstadual)}</td>
+                  <td className="p-1 border-r border-black">
+                    (+) BOLETO ESTADUAL (11,0714% {metadeMissoes > 0 ? '+ 50% MISSÕES' : ''})
+                  </td>
+                  <td className="p-1 text-right font-mono text-indigo-900 font-extrabold">{fmtCurrency(boletoEstadual)}</td>
                 </tr>
-                {/* 3º Linha: TAXA REGIONAL (3,9143% SOBRE A ARRECADAÇÃO) */}
+                {/* 3º Linha: BOLETO REGIONAL (Taxa 3,9143%) */}
                 <tr className="bg-zinc-50 font-bold">
                   <td className="p-1 border-r border-black text-center font-mono text-[11px]">-</td>
-                  <td className="p-1 border-r border-black">(+) TAXA REGIONAL (3,9143% SOBRE A ARRECADAÇÃO)</td>
-                  <td className="p-1 text-right font-mono text-indigo-900">{fmtCurrency(taxaRegional)}</td>
+                  <td className="p-1 border-r border-black">(+) BOLETO REGIONAL (3,9143%)</td>
+                  <td className="p-1 text-right font-mono text-indigo-900 font-extrabold">{fmtCurrency(boletoRegional)}</td>
                 </tr>
                 {/* Linhas vazias para preencher folha A4 com elegância */}
                 {Array.from({ length: Math.max(0, 6 - expenses.length) }).map((_, i) => (
